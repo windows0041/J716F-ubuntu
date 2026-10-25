@@ -1,0 +1,4 @@
+# j716f-microphone.service establishes the hardware selector and ALSA route.
+# A manual source is needed because the current card has no capture profile.
+load-module module-alsa-source device=hw:L2021,3 source_name=J716F_Microphone rate=48000 channels=2 format=s16le tsched=0 source_properties=device.description=J716F_Microphone
+set-default-source J716F_Microphone

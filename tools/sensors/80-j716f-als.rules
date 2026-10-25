@@ -1,0 +1,2 @@
+# Expose the known SLPI light sensor. Services are enabled explicitly.
+SUBSYSTEM=="misc", KERNEL=="fastrpc-sdsp*", ENV{IIO_SENSOR_PROXY_TYPE}+="ssc-light"

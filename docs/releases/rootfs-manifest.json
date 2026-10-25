@@ -1,0 +1,39 @@
+{
+  "format": "Android sparse ext4",
+  "label": "j716f-ubuntu",
+  "expanded_bytes": 8589934592,
+  "sparse_bytes": 2324371900,
+  "sha256": "cb7a0a3d34a49423f8fdb4769461810e614feea5d4f8787e8a5abc06d9956aa5",
+  "expanded_sha256": "0265eaef17670212a9d96cd40b0aaf40ffd1d20716835780237c10854cdb41d8",
+  "filesystem_check": "clean; e2fsck -fn on original and roundtrip",
+  "sparse_roundtrip_identical": true,
+  "file_capabilities": {
+    "/usr/bin/ping": "0100000200200000000000000000000000000000",
+    "/usr/lib/aarch64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-ptp-helper": "0100000200140000000000000000000000000000",
+    "/usr/lib/snapd/snap-confine": "00000002cf002c01000000000000000000000000"
+  },
+  "critical_files": {
+    "usr/lib/xorg/modules/drivers/modesetting_drv.so": "99cd2835a14d229732d029a9b0b22d5d7facf789046ad6e3482ccdffce8671f0",
+    "opt/j716f-display-scaling/xorg-dirty-modules/drivers/modesetting_drv.so": "493c629f91e80e9977011fd3801af1626e0c52d79219475247be151bd116467f",
+    "opt/j716f-display-scaling/lib/limited-scales.so": "f41819922cb8fb9b0fec0e8cd765d180689190d5c8a2fa7f1e12991f902092fe",
+    "usr/local/libexec/j716f-configure-speakers.py": "242be1120faa786e546e344b6a75c958d9b9dc3091de1760b547a37c2f7f4b18",
+    "etc/systemd/system/speaker-mixer.service": "7226bbeb6aed0a0511e3e4ecbfaba4510ec4f658ba7554758725283b84061152",
+    "opt/j716f-input/reprobe-touchpad.py": "e9bf537d6de9c94abb8f14cf04a5adbfd9c4edd0cba337ed4273dfde9ee7a949",
+    "opt/j716f-sensors/libexec/hexagonrpcd": "30be6b3d15d65541dbc417df3ac0d007e49b030271ff4bcd07549f0461f175e6",
+    "usr/local/libexec/j716f-microphone-setup": "906976791f09e23ddd51c7992b9e045af5fdf9403b013f11f9312a9e901e67cf",
+    "usr/local/libexec/j716f-first-boot.py": "97e7225cab98fdebfa8f6e95cf380eb6cb149064d3baa8cad4c5e3845ac6d6ef",
+    "usr/local/libexec/j716f-qbootctl": "6809613f9aa6382bae6baeeb21f2b98261b73d7a5ce80435d6f85c67b4e4ceb7",
+    "opt/j716f-fingerprint/lib/aarch64-linux-gnu/libfprint-2.so.2.0.0": "8a0243f2d35d222ef9d9e9b73f79c506fa0979ca9896e72f8a29f997bcff12da",
+    "opt/j716f-fingerprint/lib/security/pam_fprintd.so": "08aeaf9f16426cd117760006edec6b00e5a97859e63a16266100bf7e98bae45c"
+  },
+  "initial_user": "ubuntu",
+  "initial_password": "ubuntu",
+  "new_machine_id_on_boot": true,
+  "ssh_host_keys_in_image": false,
+  "wifi_profiles_in_image": false,
+  "enrolled_fingerprints_in_image": false,
+  "pulseaudio_enabled_for_fresh_accounts": true,
+  "speaker_test_app_included": false,
+  "fingerprint_private_libraries_included": true,
+  "actual_clean_install_tested": false
+}

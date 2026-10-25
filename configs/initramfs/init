@@ -1,0 +1,176 @@
+#!/bin/sh
+# init is exec'd by the kernel with an inherited environment that has no PATH
+# at all, so set one explicitly. /usr/sbin matters: iw, wpa_supplicant and
+# Wi-Fi association is managed by NetworkManager after switch_root.
+export PATH=/sbin:/usr/sbin:/bin:/usr/bin
+mount -t proc     none /proc   2>/dev/null
+mount -t sysfs    none /sys    2>/dev/null
+mount -t devtmpfs none /dev    2>/dev/null
+mkdir -p /sys/kernel/config 2>/dev/null
+mount -t configfs none /sys/kernel/config 2>/dev/null
+
+echo
+echo "=== Linux 6.15 on Lenovo Xiaoxin Pad Pro 2021 (j716f) ==="
+echo "If you can read this on the tablet screen, simple-framebuffer works."
+echo
+
+# --- USB gadget networking (telnet) --------------------------------------
+G=/sys/kernel/config/usb_gadget/g1
+mkdir -p "$G" 2>/dev/null
+if [ -d "$G" ]; then
+	echo 0x1d6b > "$G/idVendor"    2>/dev/null
+	echo 0x0104 > "$G/idProduct"   2>/dev/null
+	echo 0xEF   > "$G/bDeviceClass"    2>/dev/null
+	echo 0x02   > "$G/bDeviceSubClass" 2>/dev/null
+	echo 0x01   > "$G/bDeviceProtocol" 2>/dev/null
+	mkdir -p "$G/strings/0x409" 2>/dev/null
+	echo "postmarketOS" > "$G/strings/0x409/manufacturer" 2>/dev/null
+	echo "j716f"        > "$G/strings/0x409/product"      2>/dev/null
+	echo "0123456789"   > "$G/strings/0x409/serialnumber" 2>/dev/null
+	mkdir -p "$G/configs/c.1/strings/0x409" 2>/dev/null
+	echo "USB network" > "$G/configs/c.1/strings/0x409/configuration" 2>/dev/null
+	echo 250 > "$G/configs/c.1/MaxPower" 2>/dev/null
+	FUNC=""
+	for fn in rndis ecm; do
+		if mkdir -p "$G/functions/$fn.usb0" 2>/dev/null && [ -d "$G/functions/$fn.usb0" ]; then
+			echo "02:1a:11:00:00:01" > "$G/functions/$fn.usb0/dev_addr"  2>/dev/null
+			echo "02:1a:11:00:00:02" > "$G/functions/$fn.usb0/host_addr" 2>/dev/null
+			ln -sf "$G/functions/$fn.usb0" "$G/configs/c.1/" 2>/dev/null
+			FUNC="$fn"; break
+		fi
+	done
+	UDC=""; w=0
+	while [ $w -lt 30 ]; do
+		for u in /sys/class/udc/*; do [ -e "$u" ] && { UDC="${u##*/}"; break; }; done
+		[ -n "$UDC" ] && break
+		w=$((w+1)); sleep 0.5
+	done
+	if [ -n "$UDC" ]; then
+		echo "$UDC" > "$G/UDC" 2>/dev/null
+		echo "USB gadget '$FUNC' bound to UDC: $UDC"
+	else
+		echo "!! no UDC -- check: dmesg | grep -i -e dwc3 -e udc"
+	fi
+fi
+
+IFACE=""; i=0
+while [ $i -lt 40 ]; do
+	for cand in usb0 usb1 eth0; do
+		[ -e "/sys/class/net/$cand" ] && { IFACE="$cand"; break 2; }
+	done
+	i=$((i+1)); sleep 0.25
+done
+if [ -n "$IFACE" ]; then
+	echo "USB network interface: $IFACE"
+	ip link set "$IFACE" up 2>/dev/null
+	ip addr add 172.16.30.1/25 dev "$IFACE" 2>/dev/null
+fi
+
+# Recovery shell is exposed only when normal root handoff fails.
+mkdir -p /dev/pts 2>/dev/null
+mount -t devpts none /dev/pts 2>/dev/null
+rescue() {
+    echo "Ubuntu root handoff failed. USB-only rescue: 172.16.30.1:23"
+    if [ -n "$IFACE" ]; then
+        telnetd -b 172.16.30.1:23 -l /bin/sh 2>/dev/null &
+    fi
+    exec /bin/sh
+}
+
+for r in /sys/class/usb_role/*/role; do
+	[ -e "$r" ] && echo device > "$r" 2>/dev/null
+done
+
+# NetworkManager configures Wi-Fi after root handoff.
+# Install the clean 8 GiB filesystem at the former super start, then
+# merge GPT entries while every partition on the target LUN is unmounted.
+# A mandatory reboot ensures the kernel re-reads the new partition geometry.
+/bin/j716f-merge-root --status
+LAYOUT=$?
+case "$LAYOUT" in
+  0) echo ">> userdata already occupies the merged range" ;;
+  10)
+    mkdir -p /run /newroot || rescue
+    /bin/j716f-merge-root --save /run/j716f-gpt-before
+    [ "$?" -eq 10 ] || rescue
+    mount -t ext4 -o rw,noatime /dev/sda17 /newroot || rescue
+    if ! grep -q '^J716F_UBUNTU_CLEAN=2026.10.24-530$' /newroot/etc/j716f-release; then
+        umount /newroot
+        rescue
+    fi
+    BACKUP=/newroot/var/lib/j716f-first-boot/gpt-before
+    if ! mkdir -p "$BACKUP" || ! cp /run/j716f-gpt-before/* "$BACKUP/"; then
+        umount /newroot
+        rescue
+    fi
+    sync
+    umount /newroot || rescue
+    /bin/j716f-merge-root --apply /run/j716f-gpt-before
+    [ "$?" -eq 10 ] || rescue
+    sync
+    echo ">> super + userdata merged; rebooting before mounting the Ubuntu root"
+    reboot -f
+    rescue
+    ;;
+  *) echo "!! GPT/source verification failed; leaving the partition table unchanged"; rescue ;;
+esac
+
+if [ -e /dev/sda18 ]; then
+	echo ">> mounting /dev/sda18 as new root"
+	mkdir -p /newroot
+	if mount -t ext4 -o rw,noatime /dev/sda18 /newroot 2>/dev/null; then
+		# busybox test -x does not follow the /sbin/init -> /lib/systemd/systemd
+		# symlink correctly here, so check the resolved target instead.
+		if [ -e /newroot/lib/systemd/systemd ] && [ -f /newroot/etc/passwd ] && [ -f /newroot/etc/j716f-release ]; then
+			# --- Boot guard ---------------------------------------------
+			# Some kernel driver changes can wedge userspace so badly that
+			# even sshd cannot fork (seen with the Adreno GMU firmware: the
+			# system answered ping and accepted SSH auth but no command
+			# ever ran, so the only way out was a hard power cycle).
+			#
+			# Keep a marker on the rootfs that a successful boot clears
+			# (boot-guard-success.service). If several boots in a row never
+			# reached userspace, stop here and stay in the initramfs
+			# instead of switching root into a system that will hang -
+			# the debug shell on this initramfs is always reachable over
+			# telnet, which is what makes recovery possible.
+			mkdir -p /newroot/var/lib/boot-guard 2>/dev/null
+			ATTEMPTS=$(cat /newroot/var/lib/boot-guard/attempts 2>/dev/null || echo 0)
+			ATTEMPTS=$((ATTEMPTS + 1))
+			echo "$ATTEMPTS" > /newroot/var/lib/boot-guard/attempts 2>/dev/null
+			sync
+			echo ">> boot-guard: attempt $ATTEMPTS (cleared by boot-guard-success.service)"
+			if [ "$ATTEMPTS" -gt 3 ]; then
+				echo
+				echo "!! boot-guard: $ATTEMPTS boots without reaching userspace."
+				echo "!! Not switching root - staying in the initramfs so this"
+				echo "!! shell stays reachable. Fix the rootfs from here, then"
+				echo "!! reset the counter and reboot:"
+				echo "!!   rm -f /newroot/var/lib/boot-guard/attempts"
+				echo "!!   reboot"
+				echo
+				umount /newroot 2>/dev/null
+				rescue
+			fi
+
+			echo ">> Ubuntu rootfs mounted OK, switching root"
+			# switch_root needs the new root to be a mount point and
+			# wants the pseudo filesystems carried over. Move them, and
+			# if any move fails we still hand over - systemd mounts
+			# /dev, /proc and /sys itself from its own fstab/units.
+			mount --move /dev   /newroot/dev  2>/dev/null || mount --bind /dev /newroot/dev 2>/dev/null
+			mount --move /proc  /newroot/proc 2>/dev/null
+			mount --move /sys   /newroot/sys  2>/dev/null
+			exec switch_root /newroot /sbin/init 2>&1 || {
+				echo "!! switch_root failed, dropping to shell"
+			}
+		else
+			echo "!! /dev/sda18 has no usable init, staying in initramfs"
+			umount /newroot 2>/dev/null
+		fi
+	else
+		echo "!! could not mount /dev/sda18"
+	fi
+fi
+
+rescue

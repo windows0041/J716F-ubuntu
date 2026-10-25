@@ -1,0 +1,40 @@
+[
+  {
+    "name": "libfprint-goodix-qsee",
+    "url": "https://github.com/wrobelda/libfprint.git",
+    "commit": "430e24e538ba137b6edcfe2e1b3b8cc29c66fa6a",
+    "source_directory": "tools/libfprint-goodix-qsee",
+    "new_source_files": [
+      "libfprint/drivers/goodixj716f/README.md",
+      "libfprint/drivers/goodixj716f/goodix-j716f-proto.c",
+      "libfprint/drivers/goodixj716f/goodix-j716f-proto.h",
+      "libfprint/drivers/goodixj716f/goodix-j716f-sensor.c",
+      "libfprint/drivers/goodixj716f/goodix-j716f-sensor.h",
+      "libfprint/drivers/goodixj716f/goodix-j716f-token.c",
+      "libfprint/drivers/goodixj716f/goodix-j716f-token.h",
+      "libfprint/drivers/goodixj716f/goodix-j716f-transport.c",
+      "libfprint/drivers/goodixj716f/goodix-j716f-transport.h",
+      "libfprint/drivers/goodixj716f/goodix-j716f.c",
+      "libfprint/drivers/goodixj716f/goodix-j716f.h"
+    ],
+    "license_copy": "LICENSES/libfprint-goodix-qsee.txt",
+    "patch": "patches/userspace/libfprint-goodix-qsee.patch",
+    "patch_sha256": "53127d8ca7554c5e9512df926f704f27c5c20fa5b2b6fc1abfc841c7ea223b41"
+  },
+  {
+    "name": "qsee-supplicant",
+    "url": "https://github.com/wrobelda/qsee-supplicant.git",
+    "commit": "36e06680cf7f690fccbdcd07abc2a64c4bb061d8",
+    "source_directory": "tools/qsee-supplicant",
+    "new_source_files": [],
+    "license_copy": "LICENSES/qsee-supplicant.txt"
+  },
+  {
+    "name": "goodix-fp-spi-linux",
+    "url": "https://github.com/wrobelda/goodix-fp-spi-linux.git",
+    "commit": "5a07b0869dd072105e7bb13614afbb29da88d21d",
+    "source_directory": "tools/goodix-fp-spi-linux",
+    "new_source_files": [],
+    "license_copy": "LICENSES/goodix-fp-spi-linux.txt"
+  }
+]

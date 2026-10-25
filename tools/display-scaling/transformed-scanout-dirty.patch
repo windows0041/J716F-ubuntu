@@ -1,0 +1,118 @@
+--- a/hw/xfree86/drivers/modesetting/driver.c
++++ b/hw/xfree86/drivers/modesetting/driver.c
+@@ -558,6 +558,44 @@
+ }
+ 
+ static void
++dispatch_rotated_dirty(ScreenPtr screen)
++{
++    ScrnInfoPtr scrn = xf86ScreenToScrn(screen);
++    modesettingPtr ms = modesettingPTR(scrn);
++    xf86CrtcConfigPtr config = XF86_CRTC_CONFIG_PTR(scrn);
++    int c;
++
++    for (c = 0; c < config->num_crtc; c++) {
++        xf86CrtcPtr crtc = config->crtc[c];
++        drmmode_crtc_private_ptr priv = crtc->driver_private;
++        int ret;
++
++        if (!crtc->enabled || !crtc->rotatedPixmap || !priv ||
++            !priv->rotate_fb_id || !priv->rotate_damage ||
++            !RegionNotEmpty(DamageRegion(priv->rotate_damage)))
++            continue;
++
++#ifdef GLAMOR_HAS_GBM
++        /* Submit the shadow draw before DIRTYFB's implicit fence wait. */
++        if (ms->drmmode.glamor)
++            ms->glamor.block_handler(screen);
++#endif
++        ret = dispatch_dirty_region(scrn, crtc->rotatedPixmap,
++                                    priv->rotate_damage, priv->rotate_fb_id);
++        if (!ret && !priv->rotate_dirty_logged) {
++            xf86DrvMsg(scrn->scrnIndex, X_INFO,
++                       "J716F transformed scanout dirty updates active: fb=%u\n",
++                       priv->rotate_fb_id);
++            priv->rotate_dirty_logged = TRUE;
++        } else if (ret && !priv->rotate_dirty_warned) {
++            xf86DrvMsg(scrn->scrnIndex, X_WARNING,
++                       "J716F transformed scanout DIRTYFB failed: %d\n", ret);
++            priv->rotate_dirty_warned = TRUE;
++        }
++    }
++}
++
++static void
+ dispatch_dirty(ScreenPtr pScreen)
+ {
+     ScrnInfoPtr scrn = xf86ScreenToScrn(pScreen);
+@@ -707,6 +745,8 @@
+         dispatch_dirty(pScreen);
+ 
+     ms_dirty_update(pScreen, timeout);
++    if (!pScreen->isGPU)
++        dispatch_rotated_dirty(pScreen);
+ }
+ 
+ static void
+--- a/hw/xfree86/drivers/modesetting/drmmode_display.c
++++ b/hw/xfree86/drivers/modesetting/drmmode_display.c
+@@ -2023,7 +2023,25 @@
+         return NULL;
+     }
+ 
+-    drmmode_set_pixmap_bo(drmmode, rotate_pixmap, &drmmode_crtc->rotate_bo);
++    if (!drmmode_set_pixmap_bo(drmmode, rotate_pixmap,
++                              &drmmode_crtc->rotate_bo)) {
++        scrn->pScreen->DestroyPixmap(rotate_pixmap);
++        return NULL;
++    }
++
++    /* The root pixmap is not scanned out while a RandR transform is active.
++     * Command-mode panels need dirty notifications on this shadow FB after
++     * the transformed image has been drawn, in its own pixel coordinates.
++     */
++    drmmode_crtc->rotate_damage = DamageCreate(NULL, NULL, DamageReportNone,
++                                               TRUE, scrn->pScreen, rotate_pixmap);
++    if (!drmmode_crtc->rotate_damage) {
++        scrn->pScreen->DestroyPixmap(rotate_pixmap);
++        return NULL;
++    }
++    DamageRegister(&rotate_pixmap->drawable, drmmode_crtc->rotate_damage);
++    drmmode_crtc->rotate_dirty_logged = FALSE;
++    drmmode_crtc->rotate_dirty_warned = FALSE;
+ 
+     return rotate_pixmap;
+ }
+@@ -2034,6 +2052,12 @@
+     drmmode_crtc_private_ptr drmmode_crtc = crtc->driver_private;
+     drmmode_ptr drmmode = drmmode_crtc->drmmode;
+ 
++    if (drmmode_crtc->rotate_damage) {
++        DamageUnregister(drmmode_crtc->rotate_damage);
++        DamageDestroy(drmmode_crtc->rotate_damage);
++        drmmode_crtc->rotate_damage = NULL;
++    }
++
+     if (rotate_pixmap) {
+         rotate_pixmap->drawable.pScreen->DestroyPixmap(rotate_pixmap);
+     }
+--- a/hw/xfree86/drivers/modesetting/drmmode_display.h
++++ b/hw/xfree86/drivers/modesetting/drmmode_display.h
+@@ -30,6 +30,7 @@
+ #define DRMMODE_DISPLAY_H
+ 
+ #include "xf86drmMode.h"
++#include "damage.h"
+ #ifdef CONFIG_UDEV_KMS
+ #include "libudev.h"
+ #endif
+@@ -184,6 +185,9 @@
+ 
+     drmmode_bo rotate_bo;
+     unsigned rotate_fb_id;
++    DamagePtr rotate_damage;
++    Bool rotate_dirty_logged;
++    Bool rotate_dirty_warned;
+ 
+     PixmapPtr prime_pixmap;
+     PixmapPtr prime_pixmap_back;

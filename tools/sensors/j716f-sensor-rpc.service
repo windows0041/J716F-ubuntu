@@ -1,0 +1,23 @@
+[Unit]
+Description=J716F SLPI file service using a Linux registry copy
+Requires=j716f-sensors-remoteproc.service
+Wants=iio-sensor-proxy.service
+After=j716f-sensors-remoteproc.service
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/opt/j716f-sensors/libexec/hexagonrpcd -f /dev/fastrpc-sdsp -s -d sdsp -R /var/lib/j716f-sensors/root
+ExecStartPost=/usr/bin/python3 /opt/j716f-sensors/libexec/wait-light.py
+TimeoutStartSec=100
+Restart=on-failure
+RestartSec=10
+UMask=0077
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/j716f-sensors/root
+
+[Install]
+WantedBy=multi-user.target

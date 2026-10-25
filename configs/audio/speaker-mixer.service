@@ -1,0 +1,13 @@
+[Unit]
+Description=Enable the J716F speaker route and verified four-speaker setup
+After=sound.target alsa-restore.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=60
+ExecStart=/usr/bin/amixer -c 0 cset 'name=PRI_MI2S_RX Audio Mixer MultiMedia1' on
+ExecStart=/usr/bin/python3 /usr/local/libexec/j716f-configure-speakers.py
+
+[Install]
+WantedBy=multi-user.target

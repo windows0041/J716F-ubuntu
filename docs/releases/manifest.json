@@ -1,0 +1,68 @@
+{
+  "release": "2026.10.24-clean-530-r3",
+  "device": "TB-J716F-128GB",
+  "kernel": "6.15.11 #530",
+  "distribution": "Ubuntu 22.04 arm64",
+  "images": {
+    "boot.img": {
+      "bytes": 69648384,
+      "sha256": "ec23243812d322fdb259794cdc657717bc24a14e76b92d0e368528c5cf484e40"
+    },
+    "dtbo.img": {
+      "bytes": 25165824,
+      "sha256": "b96ff6ba263897fa79634de420fa3019eb2599789f2349a3d7cfd75d88e29602"
+    },
+    "vbmeta.img": {
+      "bytes": 65536,
+      "sha256": "efe01355cf52527745917d2ce9a786302335e7a88841c302607872ab66492910"
+    },
+    "userdata.img": {
+      "bytes": 2324371900,
+      "sha256": "cb7a0a3d34a49423f8fdb4769461810e614feea5d4f8787e8a5abc06d9956aa5"
+    }
+  },
+  "partition_images": {
+    "boot_a": "boot.img",
+    "boot_b": "boot.img",
+    "recovery_a": "boot.img",
+    "recovery_b": "boot.img",
+    "dtbo_a": "dtbo.img",
+    "dtbo_b": "dtbo.img",
+    "vbmeta_a": "vbmeta.img",
+    "vbmeta_b": "vbmeta.img"
+  },
+  "rootfs_expanded_bytes": 8589934592,
+  "rootfs_expanded_sha256": "0265eaef17670212a9d96cd40b0aaf40ffd1d20716835780237c10854cdb41d8",
+  "sparse_roundtrip_identical": true,
+  "current_tablet_erased_or_flashed": false,
+  "actual_clean_install_tested": false,
+  "initial_user": "ubuntu",
+  "initial_password": "ubuntu",
+  "personal_profiles_included": false,
+  "filesystem_layout_changed_by_installer": true,
+  "pulseaudio_enabled_for_fresh_accounts": true,
+  "speaker_test_app_included": false,
+  "r1_install_reported_successful_by_user": true,
+  "r2_live_audio_confirmed_by_user": true,
+  "fingerprint_private_libraries_included": true,
+  "live_fprintd_device_enumeration_confirmed": true,
+  "r3_live_fingerprint_confirmed_by_user": true,
+  "merge_super_userdata": true,
+  "rootfs_targets": {
+    "stock": "super",
+    "merged": "userdata"
+  },
+  "stock_userdata_bytes": 116237611008,
+  "merged_userdata_bytes": 124827545600,
+  "reclaimed_super_bytes": 8589934592,
+  "gpt_strategy": "derive from target GPT; remove entry 17 and change only entry 18 start, preserving GUIDs and unrelated bytes",
+  "gpt_backup_on_target": "/var/lib/j716f-first-boot/gpt-before",
+  "first_boot": [
+    "stock layout only: save target GPT, offline merge, verify and reboot",
+    "grow ext4 within merged userdata",
+    "generate machine ID and SSH keys",
+    "empty fingerprint store",
+    "clear known legacy boot requests preserving misc remainder",
+    "mark current A/B slot successful after display manager starts"
+  ]
+}

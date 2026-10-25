@@ -1,0 +1,51 @@
+--- a/hw/xfree86/drivers/modesetting/drmmode_display.c
++++ b/hw/xfree86/drivers/modesetting/drmmode_display.c
+@@ -1083,10 +1083,6 @@
+ 
+ #ifdef GLAMOR_HAS_GBM
+     if (drmmode->glamor) {
+-#ifdef GBM_BO_WITH_MODIFIERS
+-        uint32_t num_modifiers;
+-        uint64_t *modifiers = NULL;
+-#endif
+         uint32_t format;
+ 
+         switch (drmmode->scrn->depth) {
+@@ -1104,24 +1100,28 @@
+             break;
+         }
+ 
++        /* J716F: keep scanout and EGL import on an explicit linear layout.
++         * Fractional RandR paths allocate extra root/rotation BOs; avoid a
++         * compressed/tiled layout being interpreted as an implicit layout.
++         */
+ #ifdef GBM_BO_WITH_MODIFIERS
+-        num_modifiers = get_modifiers_set(drmmode->scrn, format, &modifiers,
+-                                          FALSE, TRUE);
+-        if (num_modifiers > 0 &&
+-            !(num_modifiers == 1 && modifiers[0] == DRM_FORMAT_MOD_INVALID)) {
++        {
++            const uint64_t linear = DRM_FORMAT_MOD_LINEAR;
+             bo->gbm = gbm_bo_create_with_modifiers(drmmode->gbm, width, height,
+-                                                   format, modifiers,
+-                                                   num_modifiers);
+-            free(modifiers);
++                                                   format, &linear, 1);
+             if (bo->gbm) {
+                 bo->used_modifiers = TRUE;
++                xf86DrvMsg(drmmode->scrn->scrnIndex, X_INFO,
++                           "J716F linear BO %ux%u pitch=%u modifier=0x%llx\n",
++                           width, height, gbm_bo_get_stride(bo->gbm),
++                           (unsigned long long)gbm_bo_get_modifier(bo->gbm));
+                 return TRUE;
+             }
+         }
+ #endif
+-
+         bo->gbm = gbm_bo_create(drmmode->gbm, width, height, format,
+-                                GBM_BO_USE_RENDERING | GBM_BO_USE_SCANOUT);
++                                GBM_BO_USE_RENDERING | GBM_BO_USE_SCANOUT |
++                                GBM_BO_USE_LINEAR);
+         bo->used_modifiers = FALSE;
+         return bo->gbm != NULL;
+     }

@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=J716F touchscreen calibration
+Exec=/home/maoyu/.local/bin/j716f-touchscreen-calibration.sh
+X-GNOME-Autostart-enabled=true
+NoDisplay=true

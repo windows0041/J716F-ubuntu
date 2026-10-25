@@ -1,0 +1,119 @@
+diff --git a/meson.build b/meson.build
+index 24de0ff..a68766f 100644
+--- a/meson.build
++++ b/meson.build
+@@ -42,7 +42,7 @@ endif
+ if get_option('gtk-tests')
+     gtk_dep = dependency('gtk+-3.0', required: false)
+ endif
+-gio_dep = dependency('gio-2.0', version: '>= 2.76')
++gio_dep = dependency('gio-2.0', version: '>= 2.72')
+ gudev_dep = dependency('gudev-1.0', version: '>= 237')
+ polkit_gobject_dep = dependency('polkit-gobject-1', version: '>= 0.91')
+ polkit_policy_directory = polkit_gobject_dep.get_pkgconfig_variable('policydir')
+diff --git a/src/iio-buffer-utils.c b/src/iio-buffer-utils.c
+index 29163ee..6aa6621 100644
+--- a/src/iio-buffer-utils.c
++++ b/src/iio-buffer-utils.c
+@@ -909,7 +909,7 @@ gboolean
+ is_buffer_usable (char *path)
+ {
+ 	gboolean buffer_usable = FALSE;
+-	g_autofd int fp = -1;
++	int fp = -1;
+ 	GPollFD fds;
+ 
+ 	/* Attempt to read from the sensor buffer */
+@@ -925,6 +925,7 @@ is_buffer_usable (char *path)
+ 	                buffer_usable = TRUE;
+ 	        else
+ 	                g_warning ("Buffer '%s' did not have data within 0.5s", path);
++		close (fp);
+ 	}
+ 
+ 	return buffer_usable;
+diff --git a/src/iio-sensor-proxy.c b/src/iio-sensor-proxy.c
+index 9c7e8cd..e4cc922 100644
+--- a/src/iio-sensor-proxy.c
++++ b/src/iio-sensor-proxy.c
+@@ -465,8 +465,9 @@ check_claim_permission (SensorData   *data,
+ 			GError      **error)
+ {
+ 	g_autoptr(GError) local_error = NULL;
+-	g_autoptr(PolkitAuthorizationResult) result = NULL;
+-	g_autoptr(PolkitSubject) subject = NULL;
++	/* polkit 0.105 in Ubuntu 22.04 has no autoptr declarations. */
++	PolkitAuthorizationResult *result = NULL;
++	PolkitSubject *subject = NULL;
+ 
+ 	subject = polkit_system_bus_name_new (sender);
+ 	result = polkit_authority_check_authorization_sync (data->auth,
+@@ -475,15 +476,18 @@ check_claim_permission (SensorData   *data,
+ 							    NULL,
+ 							    POLKIT_CHECK_AUTHORIZATION_FLAGS_NONE,
+ 							    NULL, &local_error);
++	g_object_unref (subject);
+ 	if (result == NULL ||
+ 	    !polkit_authorization_result_get_is_authorized (result))
+ 	{
+ 		g_set_error (error, G_DBUS_ERROR,
+ 			     G_DBUS_ERROR_ACCESS_DENIED,
+ 			     "Not Authorized: %s", local_error ? local_error->message : "Sensor claim not allowed");
++		g_clear_object (&result);
+ 		return FALSE;
+ 	}
+ 
++	g_object_unref (result);
+ 	return TRUE;
+ }
+ 
+@@ -525,6 +529,14 @@ handle_generic_method_call (SensorData            *data,
+ 		if (driver_type_exists (data, driver_type)) {
+ 			SensorDevice *sensor_device = DEVICE_FOR_TYPE(driver_type);
+ 
++			/* libssc synchronous discovery dispatches the default context.
++			 * A Claim can therefore arrive before driver_open() returns. */
++			if (!sensor_device) {
++				g_ptr_array_add (data->sensor_startup_dbus_invocations_delayed[driver_type],
++						 invocation);
++				return;
++			}
++
+ 			/* No other clients for this sensor? Start it */
+ 			if (g_hash_table_size (ht) == 1) {
+ 				/* Return the dbus invocation only after we receive the first
+@@ -742,8 +754,10 @@ bus_acquired_handler (GDBusConnection *connection,
+ 	/* Initialize DBus clients hash table before DBus is fully exposed */
+ 	data->client = g_udev_client_new (subsystems);
+ 
+-	for (guint i = 0; i < NUM_SENSOR_TYPES; i++)
++	for (guint i = 0; i < NUM_SENSOR_TYPES; i++) {
+ 		data->clients[i] = create_clients_hash_table ();
++		data->sensor_startup_dbus_invocations_delayed[i] = g_ptr_array_new ();
++	}
+ 
+ 	data->connection = g_object_ref (connection);
+ }
+@@ -765,8 +779,6 @@ name_acquired_handler (GDBusConnection *connection,
+ 	for (i = 0; i < NUM_SENSOR_TYPES; i++) {
+ 		SensorDevice *sensor_device;
+ 
+-		data->sensor_startup_dbus_invocations_delayed[i] = g_ptr_array_new ();
+-
+ 		if (!driver_type_exists (data, i))
+ 			continue;
+ 
+@@ -779,6 +791,13 @@ name_acquired_handler (GDBusConnection *connection,
+ 		}
+ 
+ 		DEVICE_FOR_TYPE(i) = sensor_device;
++
++		/* Replay clients which claimed during synchronous sensor discovery
++		 * or opening, just as for an already-claimed hotplugged sensor. */
++		if (g_hash_table_size (data->clients[i]) > 0) {
++			data->sensor_startup_dbus_event_delayed[i] = TRUE;
++			driver_set_polling (sensor_device, TRUE);
++		}
+ 	}
+ 
+ 	if (!any_sensors_left (data))

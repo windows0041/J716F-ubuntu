@@ -1,0 +1,20 @@
+{
+  "version": "2026.10.24-clean-530-r3",
+  "sha256": "ec23243812d322fdb259794cdc657717bc24a14e76b92d0e368528c5cf484e40",
+  "bytes": 69648384,
+  "source_sha256": "2ffb0e255d250e7ec038d51075da6eefa541faed87f01fd07059c1ef6da5ebaf",
+  "kernel_unchanged": true,
+  "dtb_unchanged": true,
+  "removed_ramdisk_entries": [
+    "etc/wifi-auto.conf",
+    "bin/wifi-autoconnect"
+  ],
+  "wifi_credentials_included": false,
+  "normal_boot_telnet": false,
+  "failed_boot_rescue": "USB only 172.16.30.1:23",
+  "stock_layout_merges_super_userdata": true,
+  "merge_helper_sha256": "db8617f1dd8d9a1e9b5bc180f91a9ba8c53d5b9971b266514e3974d0478292bf",
+  "merge_before_root_mount": true,
+  "reboot_after_merge": true,
+  "fresh_install_hardware_tested": false
+}

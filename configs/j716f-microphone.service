@@ -1,0 +1,17 @@
+[Unit]
+Description=Lenovo J716F internal microphone selector and capture routing
+Wants=sound.target sys-kernel-debug.mount
+After=sound.target alsa-restore.service sys-kernel-debug.mount
+Before=display-manager.service user@1000.service
+ConditionPathExists=/proc/device-tree/compatible
+
+[Service]
+Type=exec
+ExecStart=/usr/local/libexec/j716f-microphone-setup selector
+ExecStartPost=/usr/local/libexec/j716f-microphone-setup routes
+Restart=on-failure
+RestartSec=2
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

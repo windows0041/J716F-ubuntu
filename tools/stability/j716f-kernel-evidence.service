@@ -1,0 +1,31 @@
+[Unit]
+Description=J716F bounded kernel fault evidence
+After=local-fs.target systemd-journald.service
+ConditionPathExists=/proc/device-tree/compatible
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/j716f-stability/kernel-evidence.py
+Restart=on-failure
+RestartSec=15
+StateDirectory=j716f-stability
+StateDirectoryMode=0700
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=64M
+CPUQuota=5%
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+CapabilityBoundingSet=CAP_SYSLOG CAP_DAC_READ_SEARCH CAP_SYS_PTRACE
+ReadWritePaths=/var/lib/j716f-stability
+
+[Install]
+WantedBy=multi-user.target

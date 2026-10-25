@@ -1,0 +1,25 @@
+[Unit]
+Description=Pause J716F reverse FastRPC across system sleep
+Before=sleep.target
+StopWhenUnneeded=yes
+ConditionPathExists=/opt/j716f-sensors/libexec/hexagonrpcd
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+RuntimeDirectory=j716f-sensors-sleep
+RuntimeDirectoryMode=0700
+UMask=0077
+ExecStart=/opt/j716f-sensors/libexec/sensor-sleep.sh pre
+ExecStop=/opt/j716f-sensors/libexec/sensor-sleep.sh post
+TimeoutStartSec=20
+TimeoutStopSec=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=sleep.target

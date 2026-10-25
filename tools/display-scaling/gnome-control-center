@@ -1,0 +1,5 @@
+#!/bin/sh
+# Use a process-local filter; no global loader or compositor modifications.
+set -eu
+export LD_PRELOAD="/opt/j716f-display-scaling/lib/limited-scales.so${LD_PRELOAD:+:$LD_PRELOAD}"
+exec /usr/bin/gnome-control-center "$@"

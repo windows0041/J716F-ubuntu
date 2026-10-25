@@ -1,0 +1,12 @@
+[Unit]
+Description=J716F sensor DSP firmware startup
+After=local-fs.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/j716f-sensors/libexec/start-slpi.py
+ExecStartPost=/usr/bin/udevadm settle --timeout=10
+RemainAfterExit=yes
+TimeoutStartSec=35

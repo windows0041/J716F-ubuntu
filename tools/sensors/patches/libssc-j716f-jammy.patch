@@ -1,0 +1,57 @@
+diff --git a/meson.build b/meson.build
+index cd186ad..9726a19 100644
+--- a/meson.build
++++ b/meson.build
+@@ -101,7 +101,7 @@ sources = files()
+ headers = files()
+ map_source = files('libssc.map')
+ 
+-subdir('mocking')
++# Device deployment: mocking omitted.
+ subdir('data')
+ subdir('src')
+-subdir('tests')
++# Device deployment: tests omitted.
+diff --git a/src/libssc-sensor.c b/src/libssc-sensor.c
+index 5947dba..d17d4ea 100644
+--- a/src/libssc-sensor.c
++++ b/src/libssc-sensor.c
+@@ -80,6 +80,14 @@ discover (SSCSensor *self, GTask *task);
+ static void
+ sensor_service_discovery_timeout (gpointer user_data);
+ 
++/* Ubuntu 22.04 GLib has g_timeout_add_seconds(), but not the once helper. */
++static gboolean
++sensor_service_discovery_timeout_once (gpointer user_data)
++{
++	sensor_service_discovery_timeout (user_data);
++	return G_SOURCE_REMOVE;
++}
++
+ static void
+ attribute (SSCSensor *self, GTask *task);
+ 
+@@ -713,8 +721,8 @@ client_ready (SSCClient *client, GAsyncResult *result, gpointer user_data)
+ 	/* Wait for sensor service before discovering sensor */
+ 	priv->service_available = FALSE;
+ 	priv->service_retries = 0;
+-	priv->discovery_timeout_id = g_timeout_add_seconds_once (SENSOR_SERVICE_TIMEOUT_S,
+-								 sensor_service_discovery_timeout,
++	priv->discovery_timeout_id = g_timeout_add_seconds (SENSOR_SERVICE_TIMEOUT_S,
++								 sensor_service_discovery_timeout_once,
+ 								 ctx);
+ 	wait_for_sensor_service (self, task);
+ }
+diff --git a/src/meson.build b/src/meson.build
+index 5ea1dff..c37fd30 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -92,7 +92,7 @@ pkg.generate(
+   requires: ['glib-2.0', 'gobject-2.0', 'gio-2.0', 'qmi-glib'],
+ )
+ 
+-if dependency('gobject-introspection-1.0', required: false).found()
++if false # Introspection is not part of this deployment
+   gnome = import('gnome')
+ 
+   gir_files = gnome.generate_gir(libssc,

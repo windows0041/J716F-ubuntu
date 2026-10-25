@@ -1,0 +1,13 @@
+[Unit]
+Description=Retry a missing J716F touchpad after initial startup
+After=systemd-udev-trigger.service
+Before=display-manager.service
+ConditionPathExists=/sys/bus/i2c/devices/1-0060
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/j716f-input/reprobe-touchpad.py
+TimeoutStartSec=15
+
+[Install]
+WantedBy=multi-user.target
