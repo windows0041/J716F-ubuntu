@@ -1,4 +1,4 @@
-# Ubuntu on Lenovo TB-J716F
+# J716F-ubuntu
 
 联想小新 Pad Pro 2021（TB-J716F，128GB）的 Ubuntu 22.04 ARM64 移植项目。
 当前内核 **Linux 6.15.11 #530**，干净安装包修订版 **R3**。
@@ -11,7 +11,7 @@
 - [硬件状态与验证范围](docs/STATUS.zh-CN.md)
 - [构建说明](docs/BUILD.zh-CN.md)
 - [项目目录与维护方式](docs/PROJECT-LAYOUT.zh-CN.md)
-- [本地仓库及数据边界](docs/REPOSITORY.zh-CN.md)
+- [仓库及数据边界](docs/REPOSITORY.zh-CN.md)
 - [第三方来源与许可](LICENSES/README.md)
 
 R3 修正了新账户未启用音频服务、指纹运行库漏包的问题，并移除 Speaker Test 应用；四扬声器运行配置保留。
@@ -43,4 +43,4 @@ tools/project/          本地仓库整理与源码快照工具
 ```
 
 上游精确提交见 [docs/UPSTREAMS.json](docs/UPSTREAMS.json)。
-当前仅创建本地 Git 仓库，没有配置远端或上传到 GitHub。
+GitHub 仓库：[windows0041/J716F-ubuntu](https://github.com/windows0041/J716F-ubuntu)，开发分支为 `main`。

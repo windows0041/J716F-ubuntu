@@ -1,7 +1,9 @@
-# 本地仓库与数据边界
+# 仓库与数据边界
 
-本次按用户最新要求，仅在本机创建 Git 仓库。没有创建 GitHub 仓库，没有设置 remote，也没有 push。
-本地 Git 没有公开/私有开关；当前数据只保存在这台电脑。后续上传时可将 GitHub 仓库设为私有。
+项目先整理为本地 Git 仓库，随后由用户新建 GitHub 私有仓库
+[windows0041/J716F-ubuntu](https://github.com/windows0041/J716F-ubuntu)。
+本地 `origin` 指向 `https://github.com/windows0041/J716F-ubuntu.git`，使用 `main` 分支。
+远端可见性由 GitHub 管理；本地 Git 没有公开/私有开关。
 
 ## 纳入版本管理
 
