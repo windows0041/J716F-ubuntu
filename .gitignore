@@ -81,3 +81,8 @@ ssh_host_*
 core.[0-9]*
 *.swp
 *~
+
+# Track the clean reconstructed J716F kernel source tree.
+!/kernel/
+!/kernel/linux-6.15.11/
+!/kernel/linux-6.15.11/**

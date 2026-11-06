@@ -35,6 +35,7 @@ R3 完成文件系统、稀疏镜像、关键依赖和归档完整性核对；R3
 
 ```text
 configs/                 内核、音频、触控、指纹与 initramfs 配置
+kernel/linux-6.15.11/    Complete J716F Linux 6.15.11 #530 source and configuration
 patches/kernel/          相对原版 Linux 6.15.11 的 #530 完整源码补丁
 patches/userspace/       相对固定上游提交的用户态改动
 mkbootimg-aosp/          AOSP Android 启动镜像工具

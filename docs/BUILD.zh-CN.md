@@ -10,6 +10,8 @@ R3 完整镜像构建仍依赖这些本地输入；当前没有从空白主机�
 
 ## Linux 6.15.11
 
+The complete #530 source tree and configuration are available in `kernel/linux-6.15.11/`. The archive-and-patch method below can reproduce a clean copy.
+
 原版源归档：`linux-6.15.11.tar.xz`，来源为 kernel.org 对应版本。
 精确摘要见 `patches/kernel/snapshot.json`。本机缓存位于 `kernel/dl/`。
 需要 Python 3、patch、make、ARM64 GCC 交叉编译器及内核构建依赖。
