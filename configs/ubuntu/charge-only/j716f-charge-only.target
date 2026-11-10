@@ -1,0 +1,8 @@
+# Selected by j716f-charge-mode-generator from the bootloader's charger mode.
+[Unit]
+Description=J716F charging screen without a desktop session
+SourcePath=/proc/cmdline
+Requires=basic.target
+Wants=j716f-primary-pon.service j716f-charge-only.service j716f-usb-diagnostics.service j716f-restore-clock-after-rtc.service
+After=basic.target j716f-primary-pon.service
+AllowIsolate=yes

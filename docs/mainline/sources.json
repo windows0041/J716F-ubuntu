@@ -1,0 +1,134 @@
+{
+  "date": "2026-11-10",
+  "kernel": {
+    "version": "7.4-rc2",
+    "tag": "v7.4-rc2",
+    "commit": "7475ea8b58616b33c04afb976cf0fbaad9dd63fb",
+    "upstream": "https://github.com/torvalds/linux"
+  },
+  "ubuntu": {
+    "version": "26.10",
+    "suite": "stonking",
+    "architecture": "arm64"
+  },
+  "files": [
+    {
+      "filename": "linux-7.4-rc2.tar.gz",
+      "url": "https://codeload.github.com/torvalds/linux/tar.gz/7475ea8b58616b33c04afb976cf0fbaad9dd63fb",
+      "sha256": "0f8da6fb05d5dcec8ed0847a0e503d3f8301b687aad175ad2436f1ab0a1762db",
+      "bytes": 274629345,
+      "expected_sha256": null
+    },
+    {
+      "filename": "linux-6.15.11.tar.xz",
+      "url": "https://cdn.kernel.org/pub/linux/kernel/v6.x/linux-6.15.11.tar.xz",
+      "sha256": "89ab469fc35bd9cbc6c5bf4e5cb802581806d5cbc14fb47e5c9edcc477e65d93",
+      "bytes": 151216756,
+      "expected_sha256": "89ab469fc35bd9cbc6c5bf4e5cb802581806d5cbc14fb47e5c9edcc477e65d93"
+    },
+    {
+      "filename": "ubuntu-base-26.10-base-arm64.tar.gz",
+      "url": "https://cdimage.ubuntu.com/ubuntu-base/releases/26.10/release/ubuntu-base-26.10-base-arm64.tar.gz",
+      "sha256": "8b7ea4ed71a92873f7f4e260a3defe0d9ed85cb69c0155b12414208f79fa0f2d",
+      "bytes": 36245313,
+      "expected_sha256": "8b7ea4ed71a92873f7f4e260a3defe0d9ed85cb69c0155b12414208f79fa0f2d"
+    }
+  ],
+  "baseline_project_commit": "a4e3ee39de7e84807e3377610834be4e8e9da15b",
+  "patch": "patches/kernel/linux-7.4-rc2-j716f.patch",
+  "patch_sha256": "1b39816348e566a9f71fdfbdc0bcf3bef87fb88c79d316d21a9cafdef8f58f12",
+  "config": "configs/kernel/j716f-7.4-rc2.config",
+  "config_sha256": "80674a717c5a4d86cf31a5f106f6c99573e3357aead51a1fd18690ed9fc2b323",
+  "changed_source_files": [
+    "Documentation/devicetree/bindings/input/goodix-fingerprint.yaml",
+    "arch/arm64/boot/dts/qcom/Makefile",
+    "arch/arm64/boot/dts/qcom/sm8250-lenovo-j716f.dts",
+    "drivers/clk/qcom/dispcc-sm8250.c",
+    "drivers/firmware/qcom/qcom_scm-smc.c",
+    "drivers/firmware/qcom/qcom_scm.c",
+    "drivers/gpu/drm/msm/dsi/dsi_host.c",
+    "drivers/gpu/drm/msm/dsi/phy/dsi_phy.c",
+    "drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c",
+    "drivers/gpu/drm/msm/msm_fbdev.c",
+    "drivers/gpu/drm/panel/panel-raydium-rm69380.c",
+    "drivers/hid/hid-ids.h",
+    "drivers/hid/hid-multitouch.c",
+    "drivers/hid/i2c-hid/i2c-hid-core.c",
+    "drivers/hid/i2c-hid/i2c-hid-of-goodix.c",
+    "drivers/i2c/busses/i2c-qcom-geni.c",
+    "drivers/input/misc/Kconfig",
+    "drivers/input/misc/Makefile",
+    "drivers/input/misc/goodix_fp_spi.c",
+    "drivers/input/touchscreen/goodix.c",
+    "drivers/input/touchscreen/goodix.h",
+    "drivers/input/touchscreen/goodix_berlin_core.c",
+    "drivers/input/touchscreen/goodix_berlin_i2c.c",
+    "drivers/power/supply/bq27xxx_battery_i2c.c",
+    "drivers/regulator/qcom-rpmh-regulator.c",
+    "drivers/soc/qcom/mdt_loader.c",
+    "drivers/soc/qcom/rpmh-internal.h",
+    "drivers/soc/qcom/rpmh.c",
+    "drivers/soc/qcom/ubwc_config.c",
+    "drivers/tee/Kconfig",
+    "drivers/tee/Makefile",
+    "drivers/tee/qseecom/Kconfig",
+    "drivers/tee/qseecom/Makefile",
+    "drivers/tee/qseecom/core.c",
+    "include/linux/firmware/qcom/qcom_scm.h",
+    "include/linux/soc/qcom/mdt_loader.h",
+    "include/sound/cs35l41.h",
+    "include/uapi/linux/tee.h",
+    "sound/soc/codecs/Kconfig",
+    "sound/soc/codecs/Makefile",
+    "sound/soc/codecs/cs35l41-lib.c",
+    "sound/soc/codecs/cs35l41.c",
+    "sound/soc/codecs/es7210.c",
+    "sound/soc/qcom/common.c",
+    "sound/soc/qcom/qdsp6/q6afe-dai.c",
+    "sound/soc/qcom/qdsp6/q6afe.c",
+    "sound/soc/qcom/qdsp6/q6dsp-lpass-clocks.c",
+    "sound/soc/qcom/qdsp6/q6routing.c",
+    "sound/soc/qcom/sm8250.c",
+    "sound/soc/qcom/qdsp6/q6asm-dai.c",
+    "drivers/gpio/gpiolib.c",
+    "drivers/gpio/gpiolib-of.c",
+    "arch/arm64/boot/dts/qcom/sm8250.dtsi"
+  ],
+  "reference_port": {
+    "repository": "https://github.com/wanfanggreat/j716f-mainline-kernel",
+    "commit": "f02c5d3331b1d156c7efd42d543787a47184dc55",
+    "kernel_base": "7.3.1",
+    "adopted": [
+      "J716F PLL pre-registration rate setup (board-scoped)",
+      "J716F UBWC compatible match",
+      "Board-scoped byte and byte-interface actual rate caching across DCS transfers"
+    ]
+  },
+  "upstream_pending_backport": {
+    "subject": "soc: qcom: rpmh: Fix use-after-free on timed out blocking requests",
+    "author": "Abel Vesa",
+    "date": "2026-11-02",
+    "url": "https://patchew.org/linux/20261102-rpmh-timeout-uaf-v1-1-f1fe9d38f1b8@oss.qualcomm.com/",
+    "saved_patch": "patches/kernel/linux-7.4-rc2-rpmh-timeout-uaf.patch",
+    "sha256": "497bf9eaf2477ddc0465764e09e6069d3e508a1a5c80f044aef49e2985c8cf3d",
+    "included_in_combined_patch": true,
+    "proven_to_fix_observed_disconnect": false
+  },
+  "gpu_firmware": {
+    "file": "qcom/a650_sqe.fw",
+    "ucode_version": "0x112",
+    "kernel_minimum": "0x95",
+    "source": "installed official Ubuntu 26.10 linux-firmware-qualcomm-graphics package (compressed package file MD5 verified)",
+    "sha256": "c863ceac3a823af215205d7803776bfdc68098c2c2a5d2fd05b4aa77cd336b4b"
+  },
+  "publication": {
+    "scope": "source patches, configuration and diagnostics; no universal install image",
+    "validation_date": "2026-11-10",
+    "changed_source_files_verified": 53,
+    "kernel_configuration_and_modules_built": true,
+    "boot_white_line_absent_user_verified": true,
+    "reserved_firmware_memory_mib": 87,
+    "long_term_stability_certified": false,
+    "firmware_and_private_device_state_in_git": false
+  }
+}

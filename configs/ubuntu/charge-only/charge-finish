@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+if [ -f /run/j716f-charge-only/poweroff-requested ]; then
+    exec /bin/systemctl --no-block poweroff
+fi
+if [ -f /run/j716f-charge-only/enter-ubuntu ] || [ "${SERVICE_RESULT:-success}" != success ]; then
+    /usr/bin/touch /run/j716f-charge-only/enter-ubuntu
+    /bin/systemctl daemon-reload || true
+    exec /bin/systemctl --no-block isolate graphical.target
+fi

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Review index contents for local snapshots; print finding labels, never secrets."""
+"""Review staged additions/changes; print finding labels and paths, never secrets."""
 import json
 from pathlib import Path
 import re
@@ -15,18 +15,28 @@ PATTERNS = {
     'github_token': re.compile(rb'(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,})'),
     'aws_access_key': re.compile(rb'A[K]IA[0-9A-Z]{16}'),
     'password_on_ssh_command': re.compile(rb'sshpass\s+-p\s+[^\s]+'),
-    'original_device_serial': re.compile(rb'HA1H[L]J83'),
-    'original_filesystem_uuid': re.compile(rb'615495dc-cdbf-4aaf-a4f8-1a1ccc0125f[3]'),
+    'device_serial_in_log': re.compile(rb'androidboot\.serialno=\S+'),
+    'potential_device_uuid': re.compile(rb'\b[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\b', re.I),
+    'personal_windows_path': re.compile(rb'[A-Z]:[/\\]+Users[/\\]+[^/\\\s]+', re.I),
+    'ssh_public_key': re.compile(rb'(?m)^ssh-(?:rsa|ed25519)\s+[A-Za-z0-9+/]{40,}'),
+    'password_hash': re.compile(rb'\$(?:[156]|y)\$[A-Za-z0-9./]{8,}\$[A-Za-z0-9./]{16,}'),
 }
+PUBLIC_BUG_REFERENCE = re.compile(
+    rb'Closes: https://sashiko\.dev/#/bug/linux-[0-9a-f-]{36}\r?', re.I)
 
 
 def main():
+    changed = set(subprocess.check_output(
+        ['git', 'diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z'],
+        cwd=ROOT).split(b'\0'))
     rows = subprocess.check_output(['git', 'ls-files', '--stage', '-z'], cwd=ROOT).split(b'\0')
     findings, files = [], []
     for row in rows:
         if not row:
             continue
         metadata, raw_name = row.split(b'\t', 1)
+        if raw_name not in changed:
+            continue
         mode, object_id, stage = metadata.decode().split()
         name = raw_name.decode()
         parts = Path(name).parts
@@ -40,9 +50,16 @@ def main():
         if len(data) > 10 * 1024 * 1024 or b'\0' in data:
             findings.append({'path': name, 'reason': 'large or binary payload'})
         for label, pattern in PATTERNS.items():
-            if pattern.search(data):
+            matches = list(pattern.finditer(data))
+            if label == 'potential_device_uuid':
+                # The saved upstream RPMh mail links a public bug, not a disk.
+                matches = [match for match in matches if not PUBLIC_BUG_REFERENCE.fullmatch(
+                    data[data.rfind(b'\n', 0, match.start()) + 1:
+                         data.find(b'\n', match.end()) if b'\n' in data[match.end():] else len(data)])]
+            if matches:
                 findings.append({'path': name, 'reason': label})
-    report = {'files': len(files), 'source_bytes': sum(x['bytes'] for x in files),
+    report = {'scope': 'staged additions and modifications; existing history is not rewritten',
+              'files': len(files), 'source_bytes': sum(x['bytes'] for x in files),
               'largest_files': sorted(files, key=lambda x: x['bytes'], reverse=True)[:5],
               'findings': findings, 'remote_configured': bool(subprocess.check_output(['git', 'remote'], cwd=ROOT).strip())}
     print(json.dumps(report, ensure_ascii=False, indent=2))

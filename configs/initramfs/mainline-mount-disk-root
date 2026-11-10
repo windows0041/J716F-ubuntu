@@ -1,0 +1,74 @@
+#!/bin/sh
+# Mount only the explicitly prepared ext4 filesystem in userdata.
+# Never format, repartition, resize, or mount another internal partition.
+set -eu
+bb() { /bin/busybox "$@"; }
+fail() { echo "Disk root: $*" >&2; exit 1; }
+[ "$PPID" = 1 ] || fail "must be called by diagnostic PID 1"
+bb tr '\000' '\n' < /sys/firmware/devicetree/base/compatible | bb grep -qx lenovo,j716f || fail "wrong board"
+[ "$(bb uname -r)" = 7.4.0-rc2-j716f ] || fail "wrong kernel"
+bb awk '$2 == "/" && $3 == "rootfs" { ok=1 } END { exit !ok }' /proc/mounts || fail "not initramfs"
+bb awk '$2 == "/run" && $3 == "tmpfs" { ok=1 } END { exit !ok }' /proc/mounts || fail "/run is not RAM"
+bb awk '$1 ~ /^\/dev\// { bad=1 } END { exit bad }' /proc/mounts || fail "block storage already mounted"
+read -r expected < /etc/j716f-disk-root-uuid
+[ "${#expected}" = 36 ] || fail "invalid filesystem UUID"
+case "$expected" in *[!0123456789abcdef-]*) fail "invalid filesystem UUID" ;; esac
+read -r kernel_sha < /etc/j716f-disk-kernel-sha256
+[ "${#kernel_sha}" = 64 ] || fail "invalid kernel digest"
+case "$kernel_sha" in *[!0123456789abcdef]*) fail "invalid kernel digest" ;; esac
+device=
+node=
+count=0
+attempts=0
+while [ "$attempts" -lt 30 ]; do
+    count=0
+    for candidate in /sys/class/block/*; do
+        if bb grep -qx PARTNAME=userdata "$candidate/uevent" 2>/dev/null; then
+            device=/dev/${candidate##*/}
+            node=$candidate
+            count=$((count + 1))
+        fi
+    done
+    [ "$count" = 0 ] || break
+    attempts=$((attempts + 1))
+    bb sleep 1
+done
+[ "$count" = 1 ] && [ -b "$device" ] || fail "userdata partition not unique or missing"
+read -r expected_bytes < /etc/j716f-disk-root-bytes
+case "$expected_bytes" in 116237611008|124827545600) ;; *) fail "unreviewed userdata capacity" ;; esac
+[ "$(( $(bb cat "$node/size") * 512 ))" = "$expected_bytes" ] || fail "unexpected userdata size"
+identity=$(bb blkid "$device")
+printf '%s\n' "$identity" | bb grep -Fq "UUID=\"$expected\"" || fail "filesystem UUID mismatch"
+printf '%s\n' "$identity" | bb grep -Fq 'TYPE="ext4"' || fail "filesystem is not ext4"
+[ ! -L /newroot ] || fail "symlink root mount point"
+bb mkdir -p /newroot
+[ -z "$(bb ls -A /newroot)" ] || fail "root mount point not empty"
+# Recover the unmounted, UUID-pinned filesystem before any kernel mount.
+# Preen repairs only journal/orphan and other automatically repairable errors.
+# An unresolved error keeps the device in the RAM diagnostic environment.
+fsck=/lib/j716f-fsck
+[ -x "$fsck/ld-linux-aarch64.so.1" ] && [ -x "$fsck/e2fsck" ] || fail "missing filesystem checker"
+result=0
+"$fsck/ld-linux-aarch64.so.1" --library-path "$fsck" "$fsck/e2fsck" -p "$device" || result=$?
+case "$result" in 0|1) ;; *) fail "filesystem check needs manual attention ($result)" ;; esac
+bb mount -t ext4 -o ro,errors=remount-ro "$device" /newroot
+if [ "$(bb cat /newroot/etc/j716f-disk-desktop)" != 26.10-j716f-disk-diag-v1 ]; then
+    bb umount /newroot
+    fail "wrong disk root marker"
+fi
+[ -d /newroot/usr/lib/modules/7.4.0-rc2-j716f ] || { bb umount /newroot; fail "missing matching modules"; }
+set -- $(bb sha256sum /newroot/boot/Image-7.4.0-rc2-j716f)
+[ "$1" = "$kernel_sha" ] || { bb umount /newroot; fail "kernel staging mismatch"; }
+for directory in dev proc sys run; do
+    [ -d "/newroot/$directory" ] && [ ! -L "/newroot/$directory" ] || { bb umount /newroot; fail "invalid root mount directories"; }
+done
+# systemd-remount-fs will remount the checked root via fstab.
+bb mkdir -p /run/j716f-disk-desktop
+printf '%s\n' "$device" > /run/j716f-disk-desktop/device
+bb touch /run/j716f-disk-desktop/active
+bb killall telnetd || true
+bb killall udhcpd || true
+for directory in dev proc sys run; do
+    bb mount --move "/$directory" "/newroot/$directory"
+done
+echo "Validated userdata root ready; starting Ubuntu systemd."

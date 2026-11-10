@@ -1,0 +1,30 @@
+[Unit]
+StartLimitIntervalSec=60
+StartLimitBurst=3
+Description=J716F Lenovo Goodix fingerprint trusted application loader
+Wants=j716f-qsee-supplicant.service
+After=j716f-qsee-supplicant.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+TimeoutStartSec=30
+TimeoutStopSec=10
+ExecStartPre=/usr/bin/systemctl --quiet is-active j716f-qsee-supplicant.service
+ExecStart=/opt/j716f-fingerprint/sbin/qsee-app-loader goodixfp
+Restart=on-failure
+RestartSec=2
+CapabilityBoundingSet=CAP_SYS_ADMIN
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

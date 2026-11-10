@@ -1,0 +1,40 @@
+diff --git a/meson.build b/meson.build
+--- a/meson.build
++++ b/meson.build
+@@ -332,16 +332,8 @@
+ endif
+ 
+ subdir('data')
+-if get_option('library-only')
+-    # No emulation helper is built or installed in this deployment.
+-    emulation_conf = configuration_data()
+-    emulation_conf.set_quoted('FPI_EMULATION_ENV_VAR', 'FP_DEVICE_EMULATION')
+-    emulation_conf.set_quoted('FPI_EMULATION_HELPER_BUILDDIR', '')
+-    emulation_conf.set_quoted('FPI_EMULATION_HELPER_INSTALLDIR', '')
+-    emulation_conf.set_quoted('FPI_EMULATION_HELPER_MODULE', 'j716f-no-emulation-helper.so')
+-    configure_file(output: 'fpi-test-emulation.h', configuration: emulation_conf)
+-else
+-    subdir('tests')
++subdir('tests')
++if not get_option('library-only')
+     subdir('examples')
+ endif
+ 
+diff --git a/tests/meson.build b/tests/meson.build
+--- a/tests/meson.build
++++ b/tests/meson.build
+@@ -1,3 +1,14 @@
++if get_option('library-only')
++    # fpi-device.c includes tests/fpi-test-emulation.h even without test targets.
++    emulation_conf = configuration_data()
++    emulation_conf.set_quoted('FPI_EMULATION_ENV_VAR', 'FP_DEVICE_EMULATION')
++    emulation_conf.set_quoted('FPI_EMULATION_HELPER_BUILDDIR', '')
++    emulation_conf.set_quoted('FPI_EMULATION_HELPER_INSTALLDIR', '')
++    emulation_conf.set_quoted('FPI_EMULATION_HELPER_MODULE', 'j716f-no-emulation-helper.so')
++    configure_file(output: 'fpi-test-emulation.h', configuration: emulation_conf)
++    subdir_done()
++endif
++
+ envs = environment()
+ # Enable debug messages and abort on warnings
+ envs.set('G_DEBUG', 'fatal-warnings')

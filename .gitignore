@@ -25,6 +25,9 @@
 !/tools/add-boot-bluetooth-firmware.py
 !/tools/input/
 !/tools/input/**
+!/tools/power/
+!/tools/power/*.c
+!/tools/power/*.h
 !/tools/sensors/
 !/tools/sensors/**
 !/tools/display-scaling/
@@ -75,6 +78,7 @@
 *.log
 *.pem
 *.key
+*.pub
 id_rsa
 id_ed25519
 ssh_host_*

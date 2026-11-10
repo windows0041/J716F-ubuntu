@@ -1,0 +1,13 @@
+[Unit]
+Description=Temporary USB shell for J716F RAM desktop test
+ConditionPathExists=/run/j716f-ram-desktop/active
+After=systemd-udev-trigger.service local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/j716f-usb-diagnostics
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

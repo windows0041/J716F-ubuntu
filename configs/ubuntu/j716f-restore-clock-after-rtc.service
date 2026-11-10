@@ -1,0 +1,21 @@
+[Unit]
+Description=Restore J716F software clock after PMIC RTC registration
+After=local-fs.target
+Before=chrony.service j716f-qsee-supplicant.service j716f-goodixfp-loader.service
+ConditionPathExists=/etc/fake-hwclock.data
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 /usr/local/libexec/j716f-restore-clock-after-rtc.py
+TimeoutStartSec=20
+CapabilityBoundingSet=CAP_SYS_TIME
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+[Install]
+WantedBy=multi-user.target

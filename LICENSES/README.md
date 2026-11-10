@@ -4,7 +4,7 @@
 
 | 组件 | 来源/版本 | 许可记录 |
 | --- | --- | --- |
-| Linux 内核及相关补丁 | 原版 Linux 6.15.11 + 本机 #530 改动 | `Linux-GPL-2.0.txt`，并遵循各文件 SPDX |
+| Linux 内核及相关补丁 | 旧版 Linux 6.15.11 #530；主线固定提交见 docs/mainline/sources.json | `Linux-GPL-2.0.txt`，并遵循各文件 SPDX |
 | libfprint J716F 驱动 | `docs/UPSTREAMS.json` 中固定提交及本地补丁 | `libfprint-goodix-qsee.txt`，LGPL 2.1 |
 | qsee-supplicant | 固定上游提交，本地无代码修改 | `qsee-supplicant.txt` |
 | Goodix SPI 参考驱动 | 固定上游提交 | `goodix-fp-spi-linux.txt` |

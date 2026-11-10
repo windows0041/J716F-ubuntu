@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+[ -f /run/j716f-ram-desktop/active ] || exit 1
+for interface in /sys/class/net/*; do
+    [ "$(cat "$interface/address")" = 02:1a:11:00:00:01 ] || continue
+    interface=${interface##*/}
+    ip link set "$interface" up
+    ip address replace 172.16.30.1/25 dev "$interface"
+    sed "s/^interface .*/interface $interface/" /etc/j716f-usb-udhcpd.conf > /run/j716f-usb-udhcpd.conf
+    /usr/bin/busybox-static udhcpd /run/j716f-usb-udhcpd.conf
+    exec /usr/bin/busybox-static telnetd -F -b 172.16.30.1:23 -l /bin/sh
+done
+exit 1

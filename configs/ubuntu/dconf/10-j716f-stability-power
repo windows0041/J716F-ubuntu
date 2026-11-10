@@ -1,0 +1,5 @@
+# Keep automatic whole-system suspend off until suspend/resume is validated.
+# Per-CPU PSCI idle and display blanking remain independent.
+[org/gnome/settings-daemon/plugins/power]
+sleep-inactive-ac-type='nothing'
+sleep-inactive-battery-type='nothing'

@@ -1,0 +1,118 @@
+#!/bin/sh
+# RAM-only hardware diagnostic. No internal storage is mounted or changed.
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs none /dev
+mkdir -p /dev/pts /run /sys/kernel/config
+mount -t devpts none /dev/pts
+mount -t tmpfs none /run
+mount -t configfs none /sys/kernel/config
+# Expose the previous boot console without modifying persistent records.
+mkdir -p /sys/fs/pstore
+mount -t pstore -o ro pstore /sys/fs/pstore 2>/dev/null || true
+
+echo "=== TB-J716F mainline RAM diagnostic ==="
+uname -a
+echo "Internal storage is not mounted by this diagnostic."
+echo "USB shell: 172.16.30.1:23; host address: 172.16.30.2/25"
+
+for role in /sys/class/usb_role/*/role; do
+    [ ! -e "$role" ] || echo device > "$role"
+done
+
+G=/sys/kernel/config/usb_gadget/j716f_diag
+mkdir -p "$G"
+if [ -d "$G" ]; then
+    echo 0x1d6b > "$G/idVendor"
+    echo 0x0104 > "$G/idProduct"
+    # Keep the USB device identity stable across kernel versions.
+    echo 0x0100 > "$G/bcdDevice"
+    echo 0xEF > "$G/bDeviceClass"
+    echo 0x02 > "$G/bDeviceSubClass"
+    echo 0x01 > "$G/bDeviceProtocol"
+    mkdir -p "$G/strings/0x409" "$G/configs/c.1/strings/0x409"
+    echo J716F > "$G/strings/0x409/manufacturer"
+    echo "Mainline RAM diagnostic" > "$G/strings/0x409/product"
+    echo j716f-diag > "$G/strings/0x409/serialnumber"
+    echo "USB diagnostics" > "$G/configs/c.1/strings/0x409/configuration"
+    echo 250 > "$G/configs/c.1/MaxPower"
+    for function in rndis ecm; do
+        if mkdir -p "$G/functions/$function.usb0"; then
+            echo 02:1a:11:00:00:01 > "$G/functions/$function.usb0/dev_addr"
+            echo 02:1a:11:00:00:02 > "$G/functions/$function.usb0/host_addr"
+            if [ "$function" = rndis ]; then
+                # Match the built-in Windows rndiscmp.inf NDIS 6 driver.
+                echo 0xEF > "$G/functions/rndis.usb0/class"
+                echo 0x04 > "$G/functions/rndis.usb0/subclass"
+                echo 0x01 > "$G/functions/rndis.usb0/protocol"
+                echo RNDIS > "$G/functions/rndis.usb0/os_desc/interface.rndis/compatible_id"
+                echo 5162001 > "$G/functions/rndis.usb0/os_desc/interface.rndis/sub_compatible_id"
+                echo 1 > "$G/os_desc/use"
+                echo 0xcd > "$G/os_desc/b_vendor_code"
+                echo MSFT100 > "$G/os_desc/qw_sign"
+                ln -s "$G/configs/c.1" "$G/os_desc/"
+            fi
+            ln -s "$G/functions/$function.usb0" "$G/configs/c.1/"
+            break
+        fi
+    done
+    attempts=0
+    while [ "$attempts" -lt 60 ]; do
+        controller=""
+        for node in /sys/class/udc/*; do
+            [ ! -e "$node" ] || { controller=${node##*/}; break; }
+        done
+        if [ -n "$controller" ]; then
+            echo "$controller" > "$G/UDC"
+            echo "USB gadget bound: $controller"
+            break
+        fi
+        attempts=$((attempts + 1))
+        sleep 0.5
+    done
+fi
+
+attempts=0
+while [ "$attempts" -lt 60 ]; do
+    interface=""
+    for name in usb0 usb1 eth0; do
+        [ ! -e "/sys/class/net/$name" ] || { interface=$name; break; }
+    done
+    if [ -n "$interface" ]; then
+        ip link set "$interface" up
+        ip addr add 172.16.30.1/25 dev "$interface"
+        # No gateway or DNS option: this link is only for local diagnostics.
+        cat > /run/j716f-udhcpd.conf <<EOF
+start 172.16.30.2
+end 172.16.30.2
+interface $interface
+max_leases 1
+option subnet 255.255.255.128
+option lease 86400
+lease_file /run/j716f-udhcpd.leases
+pidfile /run/j716f-udhcpd.pid
+EOF
+        /bin/busybox udhcpd /run/j716f-udhcpd.conf > /run/j716f-udhcpd.log 2>&1
+        telnetd -b 172.16.30.1:23 -l /bin/sh
+        echo "USB-only diagnostic shell started on $interface"
+        break
+    fi
+    attempts=$((attempts + 1))
+    sleep 0.5
+done
+
+echo "Use collect-status to inspect hardware; reboot -f to exit."
+setsid cttyhack /bin/sh &
+console_pid=$!
+while :; do
+    if [ -f /run/j716f-ram-desktop/start ]; then
+        /bin/busybox rm /run/j716f-ram-desktop/start
+        if /bin/mainline-prepare-ram-desktop; then
+            kill "$console_pid" 2>/dev/null || true
+            exec /bin/busybox switch_root -c /dev/console /newroot /sbin/init
+        fi
+        echo "RAM desktop preflight failed; remaining in diagnostics."
+    fi
+    sleep 1
+done

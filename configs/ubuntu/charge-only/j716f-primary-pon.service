@@ -1,0 +1,21 @@
+[Unit]
+Description=Restore the J716F primary PMIC power-key input
+After=systemd-udev-trigger.service systemd-modules-load.service
+Before=display-manager.service j716f-charge-only.service
+ConditionPathExists=/sys/bus/platform/devices/c440000.spmi:pmic@0:pon@800
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/sbin/modprobe qcom_pon
+ExecStart=/usr/bin/python3 -B /usr/local/libexec/j716f-primary-pon.py
+TimeoutStartSec=20
+StateDirectory=j716f-input
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

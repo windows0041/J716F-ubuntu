@@ -1,47 +1,42 @@
-# J716F-ubuntu
+# J716F Ubuntu / Mainline Linux
 
-联想小新 Pad Pro 2021（TB-J716F，128GB）的 Ubuntu 22.04 ARM64 移植项目。
-当前内核 **Linux 6.15.11 #530**，干净安装包修订版 **R3**。
+联想小新 Pad Pro 2021（**TB-J716F，Snapdragon 870，128GB**）的 Linux 移植源码、配置与验证工具。
 
-本仓库保存移植源码改动、配置和打包流程。完整镜像、原厂固件、构建缓存、设备备份及个人数据留在本地，不进入 Git。
+当前开发版本固定为 **Linux 7.4-rc2 + Ubuntu 26.10 ARM64 / GNOME 51**，验证记录截至 2026-11-10。这是开发移植，尚未发布经过全流程验收的通用安装镜像；旧的 Ubuntu 22.04 R3 教程不适用于直接安装当前版本。
 
-## 使用与状态
+## 当前入口
 
-- [刷机教程](docs/INSTALL.zh-CN.md)：从已解锁的设备安装 Ubuntu，支持安装时合并 super 与 userdata。
-- [硬件状态与验证范围](docs/STATUS.zh-CN.md)
-- [构建说明](docs/BUILD.zh-CN.md)
-- [项目目录与维护方式](docs/PROJECT-LAYOUT.zh-CN.md)
-- [仓库及数据边界](docs/REPOSITORY.zh-CN.md)
-- [第三方来源与许可](LICENSES/README.md)
+- [构建内核与来源校验](docs/mainline/BUILD.zh-CN.md)
+- [硬件状态、已验证内容与限制](docs/mainline/STATUS.zh-CN.md)
+- [关键修正与技术说明](docs/mainline/FIXES.zh-CN.md)
+- [固件、用户态与再分发边界](docs/mainline/FIRMWARE.zh-CN.md)
+- [发布内容与本地验证清单](docs/mainline/PUBLICATION.zh-CN.md)
+- [固定版本、来源和 SHA-256](docs/mainline/sources.json)
 
-R3 修正了新账户未启用音频服务、指纹运行库漏包的问题，并移除 Speaker Test 应用；四扬声器运行配置保留。
-用户已确认当前设备声音和指纹正常。本轮修正没有再次刷写设备。
+已在实机验证显示、触摸、Wi-Fi、扬声器、麦克风、指纹录入/解锁以及 FD650 硬件渲染。启动白线已通过显示时钟接管修正消除；蓝牙适配器和扫描已恢复。具体测试范围及未验证功能以状态文档为准。
 
-## 安装包
+随机卡死排查中修正了一段遗漏的 4 MiB 固件预留内存，短时复测通过；目前仍保留定时器规避配置，不能据此承诺长期稳定。整机挂起/恢复、相机和完整电源管理尚未验收。
 
-本机文件：`releases/j716f-ubuntu-22.04-clean-530-r3.zip`。
-SHA-256：`02cd21443ee5d8e8a567ff65ec4863c3987611daee8da516e0d7b6df8344af83`。
-发布元数据及校验值保存在 [docs/releases/](docs/releases/)，镜像本体不在 Git 中。
-
-安装会清空目标系统和个人数据。原厂布局会合并 super 与 userdata，合并后约 116.25 GiB；已经合并的布局跳过重复操作。
-适用机型、分区检查和全部步骤以教程为准。
-
-## 验证范围
-
-用户已确认按 R1 教程刷入并进入 Ubuntu，声音和指纹随后在线修正并确认正常。
-R3 完成文件系统、稀疏镜像、关键依赖和归档完整性核对；R3 整包再次擦除安装以及从原厂未合并布局开始的完整流程尚未实机验收。
-
-## 开发入口
+## 源码布局
 
 ```text
-configs/                 内核、音频、触控、指纹与 initramfs 配置
-kernel/linux-6.15.11/    Complete J716F Linux 6.15.11 #530 source and configuration
-patches/kernel/          相对原版 Linux 6.15.11 的 #530 完整源码补丁
-patches/userspace/       相对固定上游提交的用户态改动
-mkbootimg-aosp/          AOSP Android 启动镜像工具
-tools/release/          干净镜像导出、初始化、修正和 fastboot 安装脚本
-tools/project/          本地仓库整理与源码快照工具
+patches/kernel/linux-7.4-rc2-j716f.patch   当前 53 文件组合补丁
+configs/kernel/j716f-7.4-rc2.config       已构建的内核配置
+configs/ubuntu/                         音频、指纹、充电与桌面配置
+configs/initramfs/mainline-*             诊断及根文件系统接管参考
+tools/project/                          固定来源准备、构建与诊断工具
+tools/power/                            充电界面与供电检测源码
+docs/mainline/                          当前开发文档
 ```
 
-上游精确提交见 [docs/UPSTREAMS.json](docs/UPSTREAMS.json)。
-GitHub 仓库：[windows0041/J716F-ubuntu](https://github.com/windows0041/J716F-ubuntu)，开发分支为 `main`。
+新的主线内核采用“精确上游提交 + 组合补丁 + 配置”保存，避免再次复制整棵 Linux 源码。现有 Git 历史中的 `kernel/linux-6.15.11/` 保留为旧 #530 版本，不是当前构建目标。
+
+## 旧版 R3
+
+Ubuntu 22.04 / Linux 6.15.11 #530 的材料保留在 [旧版安装说明](docs/INSTALL.zh-CN.md)、[旧版状态](docs/STATUS.zh-CN.md)及 [R3 元数据](docs/releases/)。这些材料与当前 7.4/26.10 开发版本分开使用。
+
+## 数据与许可
+
+固件、镜像、构建缓存、设备/GPT 备份、录音截图、SSH 密钥、账户密码及个人诊断记录均不纳入此次提交。USB Telnet 工具属于无认证的开发诊断入口，不应作为日常远程服务。
+
+遵循各组件原有许可与 SPDX；详见 [来源和许可](LICENSES/README.md)。当前没有向上游维护者发送补丁，也不以工具身份添加 Signed-off-by。

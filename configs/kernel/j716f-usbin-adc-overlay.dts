@@ -1,0 +1,15 @@
+// SPDX-License-Identifier: (GPL-2.0-only OR BSD-3-Clause)
+/dts-v1/;
+/plugin/;
+
+/* Read USB input voltage using the existing PM8150B ADC5 driver. */
+&{/soc@0/spmi@c440000/pmic@2/adc@3100} {
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	channel@8 {
+		reg = <0x08>; /* ADC5_USB_IN_V_16 */
+		qcom,pre-scaling = <1 16>;
+		label = "usbin_v";
+	};
+};

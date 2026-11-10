@@ -1,0 +1,19 @@
+[Unit]
+Description=Retry a missing J716F keyboard after initial HID probing
+After=systemd-udev-trigger.service
+Before=display-manager.service
+ConditionPathExists=/sys/bus/i2c/devices/4-0061
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -B /usr/local/libexec/j716f-keyboard-reprobe.py
+TimeoutStartSec=20
+StateDirectory=j716f-input
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

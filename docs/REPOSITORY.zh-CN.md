@@ -1,9 +1,9 @@
 # 仓库与数据边界
 
-项目先整理为本地 Git 仓库，随后由用户新建 GitHub 私有仓库
+项目的既有 GitHub 仓库为
 [windows0041/J716F-ubuntu](https://github.com/windows0041/J716F-ubuntu)。
-本地 `origin` 指向 `https://github.com/windows0041/J716F-ubuntu.git`，使用 `main` 分支。
-远端可见性由 GitHub 管理；本地 Git 没有公开/私有开关。
+本地 `origin` 指向 `https://github.com/windows0041/J716F-ubuntu.git`。主线移植的待发布分支为 `publish/linux-7.4-ubuntu-26.10`；旧版历史保留。
+远端可见性需在 GitHub 自行确认，本地整理不更改其权限。
 
 ## 纳入版本管理
 
@@ -28,4 +28,4 @@
 
 整理过程仅检查提交清单与敏感信息，不编译内核、不执行项目测试、不操作平板。
 
-提交前可运行 `python3 tools/project/audit-staged.py`，检查暂存区的大文件、嵌套子模块和常见敏感信息；工具只打印问题类型与路径。
+提交前可运行 `python3 tools/project/audit-staged.py`，检查本次暂存新增/修改文件的大文件、嵌套子模块和常见敏感信息；工具只打印问题类型与路径，不扫描或改写全部旧历史。

@@ -1,0 +1,43 @@
+#!/bin/sh
+# Called only by the RAM diagnostic PID 1 after an explicit /run request.
+# The source image, read-only lower filesystem and writable overlay stay in RAM.
+set -eu
+bb() { /bin/busybox "$@"; }
+fail() { echo "RAM desktop: $*" >&2; exit 1; }
+[ "$PPID" = 1 ] || fail "must be called by diagnostic init"
+bb tr '\000' '\n' < /sys/firmware/devicetree/base/compatible | bb grep -qx lenovo,j716f || fail "wrong board"
+bb uname -r | bb grep -qx '7\.4\.0-rc2-j716f' || fail "wrong kernel"
+bb awk '$2 == "/" && $3 == "rootfs" { ok=1 } END { exit !ok }' /proc/mounts || fail "not initramfs"
+bb awk '$2 == "/run" && $3 == "tmpfs" { ok=1 } END { exit !ok }' /proc/mounts || fail "/run is not RAM"
+bb awk '$1 ~ /^\/dev\// && $1 !~ /^\/dev\/(loop|ram)/ { bad=1 } END { exit bad }' /proc/mounts || fail "block storage already mounted"
+state=/run/j716f-ram-desktop
+image=$state/rootfs.squashfs
+[ -f "$image" ] && [ ! -L "$image" ] || fail "missing RAM image"
+read -r expected < "$state/sha256"
+[ "${#expected}" = 64 ] || fail "invalid SHA-256"
+case "$expected" in *[!0123456789abcdef]*) fail "invalid SHA-256" ;; esac
+set -- $(bb sha256sum "$image")
+[ "$1" = "$expected" ] || fail "image SHA-256 mismatch"
+[ ! -L /newroot ] || fail "root mount point is a symlink"
+if [ -e /newroot ]; then
+    [ -d /newroot ] && [ -z "$(bb ls -A /newroot)" ] || fail "root mount point is not empty"
+    bb awk '$2 == "/newroot" { bad=1 } END { exit bad }' /proc/mounts || fail "root mount point is in use"
+fi
+bb mkdir -p "$state/lower" "$state/upper" "$state/work" /newroot
+bb mount -t squashfs -o loop,ro "$image" "$state/lower"
+[ "$(bb cat "$state/lower/etc/j716f-ram-desktop")" = 26.10-j716f-ram-only-v1 ] || fail "wrong desktop image"
+[ -d "$state/lower/usr/lib/modules/$(bb uname -r)" ] || fail "missing matching modules"
+[ "$(bb readlink "$state/lower/etc/systemd/system/udisks2.service")" = /dev/null ] || fail "storage automount not disabled"
+[ "$(bb readlink "$state/lower/etc/systemd/system-generators/systemd-gpt-auto-generator")" = /dev/null ] || fail "GPT automount not disabled"
+bb mount -t overlay overlay -o "lowerdir=$state/lower,upperdir=$state/upper,workdir=$state/work" /newroot
+for directory in dev proc sys run; do
+    [ -d "/newroot/$directory" ] && [ ! -L "/newroot/$directory" ] || fail "invalid mount point"
+done
+bb touch "$state/active"
+# A new RAM-desktop service recreates Telnet; old shells would retain old root.
+bb killall telnetd || true
+bb killall udhcpd || true
+for directory in dev proc sys run; do
+    bb mount --move "/$directory" "/newroot/$directory"
+done
+echo "RAM desktop overlay ready; diagnostic init will execute systemd."

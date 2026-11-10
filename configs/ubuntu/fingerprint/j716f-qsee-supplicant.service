@@ -1,0 +1,31 @@
+[Unit]
+StartLimitIntervalSec=60
+StartLimitBurst=3
+Description=J716F QSEE listener for the Lenovo fingerprint application
+After=systemd-udev-settle.service
+
+[Service]
+Type=notify
+NotifyAccess=main
+TimeoutStartSec=30
+TimeoutStopSec=10
+StateDirectory=j716f-fingerprint
+StateDirectoryMode=0700
+ExecStart=/opt/j716f-fingerprint/sbin/qsee-supplicant --state-dir /var/lib/j716f-fingerprint/state
+Restart=on-failure
+RestartSec=2
+CapabilityBoundingSet=CAP_SYS_ADMIN
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/j716f-fingerprint
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

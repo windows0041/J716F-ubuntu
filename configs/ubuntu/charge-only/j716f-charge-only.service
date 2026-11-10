@@ -1,0 +1,22 @@
+[Unit]
+Description=J716F battery charging screen
+After=systemd-udev-trigger.service j716f-primary-pon.service j716f-restore-clock-after-rtc.service
+Wants=systemd-udev-trigger.service j716f-primary-pon.service
+PartOf=j716f-charge-only.target
+OnFailure=graphical.target
+OnFailureJobMode=isolate
+
+[Service]
+Type=simple
+ExecStart=/usr/local/libexec/j716f-charge-only
+ExecStopPost=/usr/local/libexec/j716f-charge-finish
+SuccessExitStatus=20 21
+RuntimeDirectory=j716f-charge-only
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+TimeoutStopSec=8
+KillSignal=SIGTERM
+UMask=0077
+NoNewPrivileges=yes
+ProtectHome=yes
+PrivateTmp=yes

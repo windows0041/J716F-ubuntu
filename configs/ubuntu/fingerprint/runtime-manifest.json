@@ -1,0 +1,12 @@
+{
+  "units": {
+    "j716f-qsee-supplicant.service": "dd9f3f6f5c4669a9d4fdc38737b32f217881146f524bce8796bf326925179b42",
+    "j716f-goodixfp-loader.service": "a9b5873b95695fed490a22eb26e1a919efd9fcf48e6f9c0ba77eddccb6ddfd0d",
+    "fprintd-j716f.conf": "8c62c20b90a2fc713ccdbfc890329a91e46dea38deec236624b7a88ec71ad5ea"
+  },
+  "artifacts": {
+    "/opt/j716f-fingerprint/lib/aarch64-linux-gnu/libfprint-2.so.2.0.0": "c0d4ff3e2386d272714bfdb1adf34df3307c5f6f28dde909e3e4215f114f2e43",
+    "/opt/j716f-fingerprint/sbin/qsee-supplicant": "41100c7cee7f395ce5b22b3816afe996accea0a1d1ea7037b1800226dd8cadcd",
+    "/opt/j716f-fingerprint/sbin/qsee-app-loader": "fbbbd4357f8778dfa3eed17dd9ba86bf3d74cd0f7449fb35b486f70a0a331834"
+  }
+}

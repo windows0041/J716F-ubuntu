@@ -1,0 +1,22 @@
+#!/bin/sh
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+echo "=== kernel ==="
+uname -a
+cat /proc/cmdline
+echo "=== partitions (read only) ==="
+cat /proc/partitions
+echo "=== DRM ==="
+for path in /sys/class/drm/card*-*/status /sys/class/drm/card*-*/modes; do
+    [ ! -f "$path" ] || { echo "$path"; cat "$path"; }
+done
+echo "=== input ==="
+cat /proc/bus/input/devices
+echo "=== network ==="
+ip addr
+echo "=== remote processors ==="
+for path in /sys/class/remoteproc/remoteproc*/name /sys/class/remoteproc/remoteproc*/state; do
+    [ ! -f "$path" ] || { echo "$path"; cat "$path"; }
+done
+echo "=== kernel log ==="
+dmesg
+echo "=== diagnostic complete ==="
