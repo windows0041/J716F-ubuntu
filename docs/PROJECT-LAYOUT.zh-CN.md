@@ -1,6 +1,6 @@
 # 项目结构
 
-当前 7.4/26.10 主线版本以 [主线构建说明](mainline/BUILD.zh-CN.md) 和 [状态](mainline/STATUS.zh-CN.md) 为入口。下表主要描述保留的 R3 目录；主线新增 configs/ubuntu、tools/power 与对应组合补丁，不复制完整 Linux 7.4 源树。
+当前 7.4/26.10 主线版本以 [主线构建说明](mainline/BUILD.zh-CN.md) 和 [状态](mainline/STATUS.zh-CN.md) 为入口。下表主要描述保留的 R3 目录；主线新增 kernel/linux-7.4-rc2 完整源码、configs/ubuntu、tools/power 与对应组合补丁。
 
 为保持已有构建脚本可用，大型工作目录留在原位置，Git 只记录整理后的源码入口。
 

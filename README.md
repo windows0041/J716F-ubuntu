@@ -21,6 +21,7 @@
 
 ```text
 patches/kernel/linux-7.4-rc2-j716f.patch   当前 53 文件组合补丁
+kernel/linux-7.4-rc2/                    完整、已调试的主线内核源码
 configs/kernel/j716f-7.4-rc2.config       已构建的内核配置
 configs/ubuntu/                         音频、指纹、充电与桌面配置
 configs/initramfs/mainline-*             诊断及根文件系统接管参考
@@ -29,7 +30,9 @@ tools/power/                            充电界面与供电检测源码
 docs/mainline/                          当前开发文档
 ```
 
-新的主线内核采用“精确上游提交 + 组合补丁 + 配置”保存，避免再次复制整棵 Linux 源码。现有 Git 历史中的 `kernel/linux-6.15.11/` 保留为旧 #530 版本，不是当前构建目标。
+当前完整内核源码位于 [kernel/linux-7.4-rc2/](kernel/linux-7.4-rc2/)，逐个导出文件与已调试的开发树核对一致；配置同时保存在该目录的 j716f.config 和 configs/kernel 中。精确上游提交、组合补丁及 [源码快照清单](docs/mainline/kernel-source-manifest.json) 保留，便于复现和检查。快照不含额外编译产物；上游原有的图片、测试素材等完整保留。
+
+现有 `kernel/linux-6.15.11/` 保留为旧 #530 版本，不是当前构建目标。若使用稀疏检出，需运行 `git sparse-checkout add kernel/linux-7.4-rc2` 才会在工作区展开新源码。
 
 ## 旧版 R3
 

@@ -1,0 +1,39 @@
+{
+  "path": "kernel/linux-7.4-rc2",
+  "upstream_commit": "7475ea8b58616b33c04afb976cf0fbaad9dd63fb",
+  "archive_sha256": "0f8da6fb05d5dcec8ed0847a0e503d3f8301b687aad175ad2436f1ab0a1762db",
+  "patch_sha256": "1b39816348e566a9f71fdfbdc0bcf3bef87fb88c79d316d21a9cafdef8f58f12",
+  "config_path": "kernel/linux-7.4-rc2/j716f.config",
+  "config_sha256": "80674a717c5a4d86cf31a5f106f6c99573e3357aead51a1fd18690ed9fc2b323",
+  "source_files": 97370,
+  "source_bytes": 1676270884,
+  "source_inventory_sha256": "c3938d70fafd724037166080522912005b99b0a2a948137d165fafd228f9820e",
+  "every_exported_entry_matches_debugged_tree": true,
+  "configuration_reference_name": ".config",
+  "generated_build_outputs_included": false,
+  "upstream_test_and_documentation_assets_preserved": true,
+  "largest_files": [
+    {
+      "path": "drivers/gpu/drm/amd/include/asic_reg/dcn/dcn_3_2_0_sh_mask.h",
+      "bytes": 24009174
+    },
+    {
+      "path": "drivers/gpu/drm/amd/include/asic_reg/nbio/nbio_7_7_0_sh_mask.h",
+      "bytes": 16730577
+    },
+    {
+      "path": "drivers/gpu/drm/amd/include/asic_reg/nbio/nbio_7_2_0_sh_mask.h",
+      "bytes": 16414003
+    },
+    {
+      "path": "drivers/gpu/drm/amd/include/asic_reg/dcn/dcn_4_1_0_sh_mask.h",
+      "bytes": 15639024
+    },
+    {
+      "path": "drivers/gpu/drm/amd/include/asic_reg/dpcs/dpcs_4_2_3_sh_mask.h",
+      "bytes": 14373916
+    }
+  ],
+  "git_tree_oid": "1e55937ff1586ae8070f9809b55ab000233765d1",
+  "staged_inventory_matches_verified_export": true
+}

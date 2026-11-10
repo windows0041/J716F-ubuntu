@@ -122,7 +122,9 @@
     "sha256": "c863ceac3a823af215205d7803776bfdc68098c2c2a5d2fd05b4aa77cd336b4b"
   },
   "publication": {
-    "scope": "source patches, configuration and diagnostics; no universal install image",
+    "scope": "complete debugged kernel source, patches, configuration and diagnostics; no universal install image",
+    "complete_kernel_source": "kernel/linux-7.4-rc2",
+    "kernel_source_manifest": "docs/mainline/kernel-source-manifest.json",
     "validation_date": "2026-11-10",
     "changed_source_files_verified": 53,
     "kernel_configuration_and_modules_built": true,

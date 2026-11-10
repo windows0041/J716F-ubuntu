@@ -9,3 +9,5 @@
 # Patch context and upstream license text must remain verbatim.
 *.patch -whitespace
 LICENSES/** -whitespace
+# Preserve the verified upstream source snapshot byte-for-byte.
+/kernel/linux-7.4-rc2/** -text -filter

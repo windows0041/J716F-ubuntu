@@ -90,3 +90,7 @@ core.[0-9]*
 !/kernel/
 !/kernel/linux-6.15.11/
 !/kernel/linux-6.15.11/**
+
+# Clean, provenance-verified mainline source snapshot, including upstream assets.
+!/kernel/linux-7.4-rc2/
+!/kernel/linux-7.4-rc2/**

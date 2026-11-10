@@ -56,6 +56,41 @@ class StagedAuditTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(report['findings'], [])
 
+    def stage_kernel_snapshot(self):
+        name = 'kernel/linux-7.4-rc2'
+        source = self.root / name / 'Makefile'
+        source.parent.mkdir(parents=True)
+        source.write_text('VERSION = 7\n')
+        pins = {'kernel': {'commit': 'a' * 40}, 'patch_sha256': 'b' * 64,
+                'config_sha256': 'c' * 64}
+        docs = self.root / 'docs/mainline'
+        docs.mkdir(parents=True)
+        (docs / 'sources.json').write_text(json.dumps(pins))
+        subprocess.run(['git', 'add', name, 'docs/mainline/sources.json'], cwd=self.root, check=True)
+        root_tree = subprocess.check_output(['git', 'write-tree'], cwd=self.root).decode().strip()
+        tree = subprocess.check_output(['git', 'rev-parse', root_tree + ':' + name], cwd=self.root).decode().strip()
+        manifest = {'path': name, 'upstream_commit': pins['kernel']['commit'],
+                    'patch_sha256': pins['patch_sha256'], 'config_sha256': pins['config_sha256'],
+                    'every_exported_entry_matches_debugged_tree': True,
+                    'generated_build_outputs_included': False, 'source_files': 1, 'git_tree_oid': tree}
+        (docs / 'kernel-source-manifest.json').write_text(json.dumps(manifest))
+        subprocess.run(['git', 'add', 'docs/mainline/kernel-source-manifest.json'], cwd=self.root, check=True)
+        return source
+
+    def test_verified_kernel_snapshot_is_accepted(self):
+        self.stage_kernel_snapshot()
+        code, report = self.audit(b'public metadata\n')
+        self.assertEqual(code, 0)
+        self.assertEqual(report['verified_kernel_snapshot_entries_staged'], 1)
+
+    def test_changed_kernel_snapshot_is_rejected(self):
+        source = self.stage_kernel_snapshot()
+        source.write_text('changed source\n')
+        subprocess.run(['git', 'add', 'kernel/linux-7.4-rc2/Makefile'], cwd=self.root, check=True)
+        code, report = self.audit(b'public metadata\n')
+        self.assertEqual(code, 1)
+        self.assertIn('source tree mismatch', report['findings'][0]['reason'])
+
 
 if __name__ == '__main__':
     unittest.main()

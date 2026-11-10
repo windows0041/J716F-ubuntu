@@ -2,7 +2,7 @@
 
 建议在 WSL2 的 Linux 文件系统中构建。不要直接把构建目录放在 Windows 挂载盘上；源码准备与编译不需要连接平板，也不执行刷写。
 
-## 依赖与固定来源
+## 依赖
 
 Debian/Ubuntu 构建环境可安装：
 
@@ -11,7 +11,25 @@ sudo apt install build-essential gcc-aarch64-linux-gnu bc bison flex \
   libssl-dev libelf-dev dwarves device-tree-compiler cpio python3 curl git
 ```
 
-在仓库根目录运行：
+## 直接构建已调试的完整源码
+
+仓库已包含 kernel/linux-7.4-rc2，可直接在仓库根目录运行，不必先下载上游归档：
+
+```sh
+mkdir -p build/kernel-7.4-rc2
+cp kernel/linux-7.4-rc2/j716f.config build/kernel-7.4-rc2/.config
+make -C kernel/linux-7.4-rc2 O="$PWD/build/kernel-7.4-rc2" \
+  ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
+make -C kernel/linux-7.4-rc2 O="$PWD/build/kernel-7.4-rc2" \
+  ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- -j4 \
+  Image modules qcom/sm8250-lenovo-j716f.dtb
+```
+
+配置使用普通文件名 j716f.config 保存，避免源码目录中的 .config 阻止 Kbuild 的 O= 分离构建。构建结果位于 build/kernel-7.4-rc2，源码树保持干净。它与 configs/kernel/j716f-7.4-rc2.config 的字节和摘要一致。
+
+## 从固定上游重建相同源码
+
+也可在仓库根目录运行原有的归档准备流程：
 
 ```sh
 mkdir -p build/downloads
@@ -25,7 +43,7 @@ JOBS=4 bash tools/project/build-mainline.sh
 
 prepare-mainline.py 校验上游压缩包、组合补丁和配置的 SHA-256，只向新的目录解压并应用补丁。版本信息见 [sources.json](sources.json)，不是动态跟踪最新主线。
 
-默认输出：
+该归档准备流程的默认输出：
 
 ```text
 build/mainline/linux-7.4-rc2/arch/arm64/boot/Image
@@ -34,6 +52,8 @@ build/mainline/linux-7.4-rc2/                 模块构建结果
 ```
 
 完整组合补丁包含当前全部移植改动及 RPMh 超时修正。单独保存的上游 RPMh 补丁仅供来源追踪，不要再次叠加。保留各文件许可，不自行补写人类 Signed-off-by。
+
+完整源码的导出方法与一致性记录见 [源码快照说明](KERNEL-SOURCE.zh-CN.md)。源码一致不等于任意构建环境会生成字节完全相同的 Image；编译器、时间戳等也会影响构建摘要。
 
 ## 充电检测与输入恢复自检
 

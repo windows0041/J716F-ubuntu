@@ -25,12 +25,46 @@ PUBLIC_BUG_REFERENCE = re.compile(
     rb'Closes: https://sashiko\.dev/#/bug/linux-[0-9a-f-]{36}\r?', re.I)
 
 
+def verified_kernel_snapshot():
+    """Only exempt a reconstructed source snapshot whose staged Git tree matches."""
+    path = 'docs/mainline/kernel-source-manifest.json'
+    result = subprocess.run(['git', 'show', ':' + path], cwd=ROOT,
+                            capture_output=True, check=False)
+    if result.returncode:
+        return None
+    manifest = json.loads(result.stdout)
+    pins = json.loads(subprocess.check_output(
+        ['git', 'show', ':docs/mainline/sources.json'], cwd=ROOT))
+    if (manifest['path'] != 'kernel/linux-7.4-rc2'
+            or manifest['upstream_commit'] != pins['kernel']['commit']
+            or manifest['patch_sha256'] != pins['patch_sha256']
+            or manifest['config_sha256'] != pins['config_sha256']
+            or not manifest['every_exported_entry_matches_debugged_tree']
+            or manifest['generated_build_outputs_included']):
+        raise ValueError('kernel source provenance mismatch')
+    root_tree = subprocess.check_output(['git', 'write-tree'], cwd=ROOT).decode().strip()
+    tree = subprocess.check_output(
+        ['git', 'rev-parse', root_tree + ':' + manifest['path']], cwd=ROOT).decode().strip()
+    if tree != manifest['git_tree_oid']:
+        raise ValueError('verified kernel source tree mismatch')
+    entries = subprocess.check_output(['git', 'ls-tree', '-r', '-z', tree], cwd=ROOT).split(b'\0')
+    if len([entry for entry in entries if entry]) != manifest['source_files']:
+        raise ValueError('verified kernel source entry count mismatch')
+    return manifest['path'] + '/'
+
+
 def main():
+    try:
+        kernel_prefix = verified_kernel_snapshot()
+    except (KeyError, ValueError, subprocess.CalledProcessError) as error:
+        print(json.dumps({'findings': [{'path': 'docs/mainline/kernel-source-manifest.json',
+                                      'reason': str(error)}]}))
+        return 1
     changed = set(subprocess.check_output(
         ['git', 'diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z'],
         cwd=ROOT).split(b'\0'))
     rows = subprocess.check_output(['git', 'ls-files', '--stage', '-z'], cwd=ROOT).split(b'\0')
-    findings, files = [], []
+    findings, files, kernel_files = [], [], 0
     for row in rows:
         if not row:
             continue
@@ -42,6 +76,9 @@ def main():
         parts = Path(name).parts
         if mode == '160000' or stage != '0':
             findings.append({'path': name, 'reason': 'unexpected submodule or unmerged index entry'})
+            continue
+        if kernel_prefix and name.startswith(kernel_prefix):
+            kernel_files += 1
             continue
         if parts[0] in FORBIDDEN_TOP or parts[0].startswith('backup') or 'local-history' in parts:
             findings.append({'path': name, 'reason': 'private or generated directory'})
@@ -60,6 +97,7 @@ def main():
                 findings.append({'path': name, 'reason': label})
     report = {'scope': 'staged additions and modifications; existing history is not rewritten',
               'files': len(files), 'source_bytes': sum(x['bytes'] for x in files),
+              'verified_kernel_snapshot_entries_staged': kernel_files,
               'largest_files': sorted(files, key=lambda x: x['bytes'], reverse=True)[:5],
               'findings': findings, 'remote_configured': bool(subprocess.check_output(['git', 'remote'], cwd=ROOT).strip())}
     print(json.dumps(report, ensure_ascii=False, indent=2))

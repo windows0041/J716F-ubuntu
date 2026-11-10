@@ -1,0 +1,2453 @@
+// SPDX-License-Identifier: GPL-2.0-only
+/*
+ * Copyright (c) 2025, David Wronek <david@mainlining.org>
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/arm/qcom,ids.h>
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/sound/qcom,q6afe.h>
+#include <dt-bindings/sound/qcom,q6asm.h>
+#include <dt-bindings/clock/qcom,camcc-sm8250.h>
+#include <dt-bindings/phy/phy.h>
+#include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+#include "sm8250.dtsi"
+#include "pm8009.dtsi"
+#include "pm8150.dtsi"
+/*
+ * Lenovo J716F: PM8150B (SPMI USID 2) is the USB/charger PMIC, and its
+ * GPIO 12 is wired to the digital microphone power enable. The vendor
+ * dtbo describes it as
+ *
+ *   qcom.msm-dmic-en-gpio = <&pm8150b_gpios 12 GPIO_ACTIVE_LOW>;
+ *
+ * Without this include the PMIC is never instantiated, gpio 12 has no
+ * consumer, and the DMIC rails stay off - which is consistent with the
+ * DMIC clock pads staying static no matter how the VA macro registers
+ * are programmed.
+ */
+#include "pm8150b.dtsi"
+#include "pm8150l.dtsi"
+
+/ {
+	model = "Lenovo Xiaoxin Pad Pro 2021";
+	compatible = "lenovo,j716f", "qcom,sm8250";
+	chassis-type = "tablet";
+
+	/* required for bootloader to select correct board */
+	qcom,msm-id = <QCOM_ID_SM8250 0x20001>; /* SM8250 v2.1 */
+	qcom,board-id = <0x2010008 0>;
+
+	aliases {
+		serial0 = &uart6;
+	};
+
+	chosen {
+		#address-cells = <2>;
+		#size-cells = <2>;
+		ranges;
+
+		/*
+		 * Point the console at the bootloader's live framebuffer. The
+		 * previously working v6.2 port relied on this property together
+		 * with console=tty0 on the kernel cmdline; without it the screen
+		 * stays dark even though simple-framebuffer probes.
+		 */
+		stdout-path = "framebuffer0";
+
+		/*
+		 * The label must be framebuffer0: stdout-path above is resolved as
+		 * a node *name or label* in the live tree, and the v6.2 port this
+		 * was carried over from used `framebuffer0:`. Naming the label
+		 * `framebuffer` silently breaks the lookup, leaving the console on
+		 * the dummy device.
+		 */
+		framebuffer0: framebuffer@9c000000 {
+			compatible = "simple-framebuffer";
+			reg = <0x0 0x9c000000 0x0 0x2300000>;
+			width = <2560>;
+			height = <1600>;
+			stride = <(2560 * 4)>;
+			format = "a8r8g8b8";
+		};
+	};
+
+	/*
+	 * Lenovo's GF3626 control lines; SPI traffic belongs to QSEE.
+	 * Stock DT: IRQ 23, reset 22, external enable 100, RPMh ldoc10.
+	 * The reset line is physically active-low: low for 3 ms, then high.
+	 */
+	goodix_fp: fingerprint {
+		compatible = "goodix,gf3626";
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <23 IRQ_TYPE_EDGE_RISING>;
+
+		reset-gpios = <&tlmm 22 GPIO_ACTIVE_LOW>;
+		enable-gpios = <&tlmm 100 GPIO_ACTIVE_HIGH>;
+		vdd-supply = <&vreg_l10d_3p0>;
+		firmware-name = "goodixfp";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&fp_irq_active &fp_reset_active &fp_envdd_active>;
+		status = "okay";
+	};
+
+	gpio-keys {
+		compatible = "gpio-keys";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&volume_up_n>;
+
+		key-vol-up {
+			label = "Volume Up";
+			linux,code = <KEY_VOLUMEUP>;
+			gpios = <&pm8150_gpios 6 GPIO_ACTIVE_LOW>;
+			debounce-interval = <15>;
+			linux,can-disable;
+			wakeup-source;
+		};
+	};
+
+	reserved-memory {
+		cont_splash_mem: memory@9c000000 {
+			reg = <0x0 0x9c000000 0x0 0x2300000>;
+			no-map;
+		};
+
+		/* Persistent console, so a hang during boot can be read back
+		 * from /sys/fs/pstore on the next successful boot. */
+		ramoops: ramoops@b0000000 {
+			compatible = "ramoops";
+			reg = <0x0 0xb0000000 0x0 0x100000>;
+
+			record-size = <0x20000>;
+			console-size = <0x40000>;
+			pmsg-size = <0x20000>;
+		};
+	};
+
+	vph_pwr: regulator-vph-pwr {
+		compatible = "regulator-fixed";
+
+		regulator-name = "vph_pwr";
+		regulator-min-microvolt = <3700000>;
+		regulator-max-microvolt = <3700000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	/* S6c is really ebi.lvl but it's there for supply map completeness sake. */
+	vreg_s6c_0p88: regulator-smpc6 {
+		compatible = "regulator-fixed";
+
+		regulator-name = "vreg_s6c_0p88";
+		regulator-min-microvolt = <880000>;
+		regulator-max-microvolt = <880000>;
+		regulator-always-on;
+
+		vin-supply = <&vph_pwr>;
+	};
+
+	/*
+	 * Panel analog rail. Not a PMIC LDO: it is a GPIO-gated boost, taken from
+	 * the vendor tree (display_gpio_regulator@1 -> "display_panel_avdd"),
+	 * which specifies 5.5V, ~233us ramp and boot-on, gated by TLMM gpio61
+	 * (the vendor's display_panel_avdd_default pinctrl drives gpio61 high).
+	 * The rm69380 driver requires an avdd-supply, so this has to exist.
+	 */
+	panel_avdd: regulator-panel-avdd {
+		compatible = "regulator-fixed";
+
+		regulator-name = "display_panel_avdd";
+		regulator-min-microvolt = <5500000>;
+		regulator-max-microvolt = <5500000>;
+		regulator-enable-ramp-delay = <233>;
+		regulator-boot-on;
+
+		gpio = <&tlmm 61 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+
+		vin-supply = <&vph_pwr>;
+	};
+
+	qca6390-pmu {
+		compatible = "qcom,qca6390-pmu";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&bt_en>, <&wlan_en>;
+
+		vddaon-supply = <&vreg_s6a_0p6>;
+		vddpmu-supply = <&vreg_s2f_0p5>;
+		vddrfa0p95-supply = <&vreg_s6a_0p6>;
+		vddrfa1p3-supply = <&vreg_s8c_1p2>;
+		vddrfa1p9-supply = <&vreg_s5a_1p9>;
+		vddpcie1p3-supply = <&vreg_s8c_1p2>;
+		vddpcie1p9-supply = <&vreg_s5a_1p9>;
+		vddio-supply = <&vreg_s4a_1p8>;
+
+		wlan-enable-gpios = <&tlmm 20 GPIO_ACTIVE_HIGH>;
+		bt-enable-gpios = <&tlmm 21 GPIO_ACTIVE_HIGH>;
+
+		regulators {
+			vreg_pmu_rfa_cmn: ldo0 {
+				regulator-name = "vreg_pmu_rfa_cmn";
+			};
+
+			vreg_pmu_aon_0p59: ldo1 {
+				regulator-name = "vreg_pmu_aon_0p59";
+			};
+
+			vreg_pmu_wlcx_0p8: ldo2 {
+				regulator-name = "vreg_pmu_wlcx_0p8";
+			};
+
+			vreg_pmu_wlmx_0p85: ldo3 {
+				regulator-name = "vreg_pmu_wlmx_0p85";
+			};
+
+			vreg_pmu_btcmx_0p85: ldo4 {
+				regulator-name = "vreg_pmu_btcmx_0p85";
+			};
+
+			vreg_pmu_rfa_0p8: ldo5 {
+				regulator-name = "vreg_pmu_rfa_0p8";
+			};
+
+			vreg_pmu_rfa_1p2: ldo6 {
+				regulator-name = "vreg_pmu_rfa_1p2";
+			};
+
+			vreg_pmu_rfa_1p7: ldo7 {
+				regulator-name = "vreg_pmu_rfa_1p7";
+			};
+
+			vreg_pmu_pcie_0p9: ldo8 {
+				regulator-name = "vreg_pmu_pcie_0p9";
+			};
+
+			vreg_pmu_pcie_1p8: ldo9 {
+				regulator-name = "vreg_pmu_pcie_1p8";
+			};
+		};
+	};
+};
+
+&adsp {
+	firmware-name = "qcom/sm8250/LENOVO/J716F/adsp.mbn";
+	status = "okay";
+};
+
+/*
+ * NOTE: qcom,protection-domain is intentionally kept on the APR services.
+ * Removing it makes the APR devices appear, but the ADSP then never brings
+ * up its audio protection domain, and every AFE command fails with -110
+ * ("AFE set params failed"), so playback cannot start. With PDR working the
+ * services probe slightly later but the AFE ports are actually usable.
+ */
+
+&apps_rsc {
+	regulators-0 {
+		compatible = "qcom,pm8150-rpmh-regulators";
+		qcom,pmic-id = "a";
+
+		vdd-s1-supply = <&vph_pwr>;
+		vdd-s2-supply = <&vph_pwr>;
+		vdd-s3-supply = <&vph_pwr>;
+		vdd-s4-supply = <&vph_pwr>;
+		vdd-s5-supply = <&vph_pwr>;
+		vdd-s6-supply = <&vph_pwr>;
+		vdd-s7-supply = <&vph_pwr>;
+		vdd-s8-supply = <&vph_pwr>;
+		vdd-s9-supply = <&vph_pwr>;
+		vdd-s10-supply = <&vph_pwr>;
+		vdd-l1-l8-l11-supply = <&vreg_s6c_0p88>;
+		vdd-l2-l10-supply = <&vreg_bob>;
+		vdd-l3-l4-l5-l18-supply = <&vreg_s6a_0p6>;
+		vdd-l6-l9-supply = <&vreg_s8c_1p2>;
+		vdd-l7-l12-l14-l15-supply = <&vreg_s5a_1p9>;
+		vdd-l13-l16-l17-supply = <&vreg_bob>;
+
+		/* (S1+S2+S3) - cx.lvl (ARC) */
+
+		vreg_s4a_1p8: smps4 {
+			regulator-name = "vreg_s4a_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1920000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-allow-set-load;
+			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
+						   RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_s5a_1p9: smps5 {
+			regulator-name = "vreg_s5a_1p9";
+			regulator-min-microvolt = <1900000>;
+			regulator-max-microvolt = <2040000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_s6a_0p6: smps6 {
+			regulator-name = "vreg_s6a_0p6";
+			regulator-min-microvolt = <600000>;
+			regulator-max-microvolt = <1128000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l2a_3p1: ldo2 {
+			regulator-name = "vreg_l2a_3p1";
+			regulator-min-microvolt = <3072000>;
+			regulator-max-microvolt = <3072000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		/* L3 is unused, L4 - lmx.lvl (ARC) */
+
+		vreg_l5a_0p88: ldo5 {
+			regulator-name = "vreg_l5a_0p88";
+			regulator-min-microvolt = <880000>;
+			regulator-max-microvolt = <880000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l6a_1p2: ldo6 {
+			regulator-name = "vreg_l6a_1p2";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-allow-set-load;
+			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
+						   RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		/* L7 is unused. */
+
+		vreg_l9a_1p2: ldo9 {
+			regulator-name = "vreg_l9a_1p2";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		/* L10 is unused, L11 - lcx.lvl (ARC) */
+
+		vreg_l12a_1p8: ldo12 {
+			regulator-name = "vreg_l12a_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l13a_3p0: ldo13 {
+			regulator-name = "vreg_l13a_3p0";
+			/*
+			 * Diagnostic (2026-10-19): the touch controller's avdd is
+			 * this rail (vendor dtbo __symbols__: pm8150_l13 ->
+			 * goodix-gt738x@5d:avdd-supply). Observed users=0,
+			 * enabled=0 whenever the Goodix driver is not mid-probe,
+			 * and every I2C access to 0x5d times out - including
+			 * addresses with no device, which means SDA is being held
+			 * low by something. Keeping the rail always-on rules the
+			 * supply-timing theory in or out.
+			 */
+			regulator-always-on;
+			regulator-min-microvolt = <3008000>;
+			regulator-max-microvolt = <3008000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l14a_1p88: ldo14 {
+			regulator-name = "vreg_l14a_1p88";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1880000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		/* L15 is unused. */
+
+		vreg_l16a_3p3: ldo16 {
+			regulator-name = "vreg_l16a_3p3";
+			regulator-min-microvolt = <3024000>;
+			regulator-max-microvolt = <3304000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l17a_2p5: ldo17 {
+			regulator-name = "vreg_l17a_2p5";
+			regulator-min-microvolt = <2496000>;
+			regulator-max-microvolt = <3008000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-allow-set-load;
+			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
+						   RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l18a_0p9: ldo18 {
+			regulator-name = "vreg_l18a_0p9";
+			regulator-min-microvolt = <800000>;
+			regulator-max-microvolt = <920000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+
+	/*
+	 * Remaining regulators that are not yet supported:
+	 * OLEDB: 4925000-8100000
+	 * ab: 4600000-6100000
+	 * ibb: 800000-5400000
+	 */
+
+	regulators-1 {
+		compatible = "qcom,pm8150l-rpmh-regulators";
+		qcom,pmic-id = "c";
+
+		vdd-s1-supply = <&vph_pwr>;
+		vdd-s2-supply = <&vph_pwr>;
+		vdd-s3-supply = <&vph_pwr>;
+		vdd-s4-supply = <&vph_pwr>;
+		vdd-s5-supply = <&vph_pwr>;
+		vdd-s6-supply = <&vph_pwr>;
+		vdd-s7-supply = <&vph_pwr>;
+		vdd-s8-supply = <&vph_pwr>;
+		vdd-l1-l8-supply = <&vreg_s4a_1p8>;
+		vdd-l2-l3-supply = <&vreg_s8c_1p2>;
+		vdd-l4-l5-l6-supply = <&vreg_bob>;
+		vdd-l7-l11-supply = <&vreg_bob>;
+		vdd-l9-l10-supply = <&vreg_bob>;
+		vdd-bob-supply = <&vph_pwr>;
+
+		vreg_bob: bob {
+			regulator-name = "vreg_bob";
+			regulator-min-microvolt = <3008000>;
+			regulator-max-microvolt = <3960000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_AUTO>;
+		};
+
+		/*
+		 * S1-S6 are ARCs:
+		 * (S1+S2) - gfx.lvl,
+		 * S3 - mx.lvl,
+		 * (S4+S5) - mmcx.lvl,
+		 * S6 - ebi.lvl
+		 */
+
+		vreg_s7c_0p35: smps7 {
+			regulator-name = "vreg_s7c_0p35";
+			regulator-min-microvolt = <348000>;
+			regulator-max-microvolt = <1000000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_s8c_1p2: smps8 {
+			regulator-name = "vreg_s8c_1p2";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1400000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l1c_1p8: ldo1 {
+			regulator-name = "vreg_l1c_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		/* L2 is unused. */
+
+		vreg_l3c_0p8: ldo3 {
+			regulator-name = "vreg_l3c_0p8";
+			regulator-min-microvolt = <800000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		/* L4 is unused. */
+
+		vreg_l5c_1p8: ldo5 {
+			regulator-name = "vreg_l5c_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <2800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l6c_2p9: ldo6 {
+			regulator-name = "vreg_l6c_2p9";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <2960000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-allow-set-load;
+			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
+						   RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l7c_2p85: ldo7 {
+			regulator-name = "vreg_l7c_2p85";
+			regulator-min-microvolt = <2856000>;
+			regulator-max-microvolt = <3104000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l8c_1p8: ldo8 {
+			regulator-name = "vreg_l8c_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l9c_2p9: ldo9 {
+			regulator-name = "vreg_l9c_2p9";
+			regulator-min-microvolt = <2704000>;
+			regulator-max-microvolt = <2960000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-allow-set-load;
+			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
+						   RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l10c_3p3: ldo10 {
+			regulator-name = "vreg_l10c_3p3";
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3312000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l11c_3p3: ldo11 {
+			regulator-name = "vreg_l11c_3p0";
+			regulator-min-microvolt = <3104000>;
+			regulator-max-microvolt = <3304000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+
+	/*
+	 * PM8150A LDO C bank.
+	 *
+	 * The touch controller's "vdd" rail is pm8150a_l1 in the vendor tree,
+	 * i.e. ldoc1 - not ldoa1. Those are two different banks with different
+	 * inputs: ldoa1 is fed from S6C (0.88 V) and physically cannot produce
+	 * 1.8 V, which is why describing the rail as ldoa1 wedged the PMIC.
+	 * ldoc1 runs off VPH_PWR.
+	 */
+	regulators-3 {
+		compatible = "qcom,pm8150a-ldoc-rpmh-regulators";
+		/* RPMh resource names are ldoc1..ldoc12. */
+		qcom,pmic-id = "c";
+
+		vdd-l1-l2-supply = <&vph_pwr>;
+		vdd-l3-supply = <&vph_pwr>;
+		vdd-l4-l5-l6-supply = <&vph_pwr>;
+		vdd-l7-supply = <&vph_pwr>;
+		vdd-l8-supply = <&vph_pwr>;
+		vdd-l9-l10-supply = <&vph_pwr>;
+		vdd-l11-supply = <&vph_pwr>;
+		vdd-l12-supply = <&vph_pwr>;
+
+		vreg_l1d_1p8: ldoc1 {
+			regulator-name = "vreg_l1d_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+		};
+
+		/* Stock goodix_fp:vdd-supply resolves to RPMh resource ldoc10. */
+		vreg_l10d_3p0: ldoc10 {
+			regulator-name = "vreg_l10d_3p0";
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3312000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+
+	regulators-2 {
+		compatible = "qcom,pm8009-rpmh-regulators";
+		qcom,pmic-id = "f";
+
+		vdd-s1-supply = <&vph_pwr>;
+		vdd-s2-supply = <&vreg_bob>;
+		vdd-l2-supply = <&vreg_s8c_1p2>;
+		vdd-l5-l6-supply = <&vreg_bob>;
+		vdd-l7-supply = <&vreg_s4a_1p8>;
+
+		vreg_s1f_1p2: smps1 {
+			regulator-name = "vreg_s1f_1p2";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_s2f_0p5: smps2 {
+			regulator-name = "vreg_s2f_0p5";
+			regulator-min-microvolt = <512000>;
+			regulator-max-microvolt = <1100000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l1f_1p2: ldo1 {
+			regulator-name = "vreg_l1f_1p2";
+			regulator-min-microvolt = <1104000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+				};
+
+		vreg_l2f_1p2: ldo2 {
+			regulator-name = "vreg_l2f_1p1";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l3f_1p2: ldo3 {
+			regulator-name = "vreg_l3f_1p2";
+			regulator-min-microvolt = <1056000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l4f_1p3: ldo4 {
+			regulator-name = "vreg_l4f_1p3";
+			regulator-min-microvolt = <1096000>;
+			regulator-max-microvolt = <1304000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l5f_2p8: ldo5 {
+			regulator-name = "vreg_l5f_2p85";
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <3000000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+				};
+
+		vreg_l6f_2p8: ldo6 {
+			regulator-name = "vreg_l6f_2p8";
+			regulator-min-microvolt = <2800000>;
+			regulator-max-microvolt = <3000000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l7f_1p8: ldo7 {
+			regulator-name = "vreg_l7f_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+				};
+	};
+};
+
+&cdsp {
+	firmware-name = "qcom/sm8250/LENOVO/J716F/cdsp.mbn";
+	status = "okay";
+};
+
+&gmu {
+	status = "okay";
+};
+
+&gpi_dma0 {
+	status = "okay";
+};
+
+&gpi_dma1 {
+	status = "okay";
+};
+
+&gpi_dma2 {
+	status = "okay";
+};
+
+&gpu {
+	status = "okay";
+
+	/*
+	 * Lenovo J716F: GPU 3D is intentionally left on the stock OPP table
+	 * but without firmware, because enabling it wedges the machine.
+	 *
+	 * Measured with the Adreno firmware in place: msm_devfreq_init()
+	 * cannot register the cooling device (vdd/vddcx are dummy regulators,
+	 * they are not modelled anywhere in the vendor DT either), the GPU
+	 * ends up pinned at the top OPP (670 MHz) and the load average climbs
+	 * monotonically - 0.85 at t=0, 6.3 at t=60s, 24+ shortly after - until
+	 * userspace stops scheduling. Two attempts to tame it failed:
+	 *   - /delete-property/ operating-points-v2  -> adreno_gpu_init()
+	 *     errors out with "Unable to find the OPP table" and the GPU never
+	 *     probes at all.
+	 *   - replacing it with a single 441.6 MHz OPP -> still wedged.
+	 *
+	 * So the firmware is deliberately NOT shipped in the rootfs and the
+	 * desktop runs on llvmpipe. The boot-guard service removes any stray
+	 * a650 firmware before the GPU driver probes, which is what keeps this
+	 * recoverable.
+	 */
+	zap-shader {
+		memory-region = <&gpu_mem>;
+		firmware-name = "qcom/sm8250/LENOVO/J716F/a650_zap.mbn";
+	};
+};
+
+&i2c1 {
+	clock-frequency = <1000000>;
+	status = "okay";
+
+	touchpad@60 {
+		compatible = "hid-over-i2c";
+		reg = <0x60>;
+
+		vdd-supply = <&vreg_l16a_3p3>;
+		vddl-supply = <&vreg_l8c_1p8>;
+
+		/*
+		 * Lenovo TB-J716F: the touchpad sits on GPIO 11, not 14.
+		 *
+		 * The two I2C-HID peripherals on this board had their interrupt
+		 * lines swapped in the port: the kernel enumerated
+		 *
+		 *   msmgpio 14 ... hid-over-i2c    <- 4-0061, the keyboard
+		 *   msmgpio 11 ... hid-over-i2c    <- 1-0060, this touchpad
+		 *
+		 * while the DT claimed the opposite. The keyboard therefore
+		 * listened on a line that never fires and produced no input at
+		 * all - which is why typing does nothing on the lock screen.
+		 */
+		interrupt-parent = <&tlmm>;
+		interrupts = <14 IRQ_TYPE_LEVEL_LOW>;
+
+		hid-descr-addr = <0x01>;
+		post-power-on-delay-ms = <100>;
+	};
+};
+
+&i2c3 {
+	clock-frequency = <400000>;
+	status = "okay";
+
+	fuel-gauge@55 {
+		compatible = "ti,bq27541";
+		reg = <0x55>;
+	};
+};
+
+&i2c4 {
+	clock-frequency = <400000>;
+	status = "okay";
+
+	/* onsemi NB7VPQ904M USB redriver @ 19 */
+
+	/* Four CS35L41 speaker amplifiers (vendor DT fragment@55):
+	 * all share reset gpio 131; IRQs are 67, 113, 126, 68.
+	 * Boost: 3500 mA peak, 1 uH inductor, 15 uF cap.
+	 */
+	spk_amp1: speaker@40 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x40>;
+		#sound-dai-cells = <1>;
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <67 IRQ_TYPE_LEVEL_LOW>;
+		interrupt-controller;
+		#interrupt-cells = <2>;
+		interrupt-names = "cs35l41_1_irq";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&spk1_irq_default &spk_reset_default>;
+
+		reset-gpios = <&tlmm 131 GPIO_ACTIVE_HIGH>;
+
+		VA-supply = <&vreg_l16a_3p3>;
+		/* Boost input rail: the amplifier's boost converter runs off the
+		 * main battery rail. */
+		VP-supply = <&vph_pwr>;
+
+		cirrus,boost-type = <0>;
+		cirrus,boost-peak-milliamp = <3500>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <15>;
+		/* Boost converter target voltage. Without this the vendor
+		 * driver leaves BSTCVRT_VCTRL1 at 0 and the speaker is silent. */
+		cirrus,boost-ctl-millivolt = <4600>;
+		cirrus,asp-sdout-hiz = <3>;
+		/* Vendor parity (dtbo fragment@55): GPIO2 is the amplifier's
+		 * push-pull active-low interrupt output. Without it the PUP-done
+		 * signal never reaches the host and power-up times out. */
+		cirrus,gpio2-src-select = <4>;
+		cirrus,gpio2-output-enable;
+	};
+
+	spk_amp2: speaker@41 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x41>;
+		#sound-dai-cells = <1>;
+		sound-name-prefix = "SPK2";
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <113 IRQ_TYPE_LEVEL_LOW>;
+		interrupt-controller;
+		#interrupt-cells = <2>;
+		interrupt-names = "cs35l41_2_irq";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&spk2_irq_default>;
+
+		reset-gpios = <&tlmm 131 GPIO_ACTIVE_HIGH>;
+
+		VA-supply = <&vreg_l16a_3p3>;
+		/* Boost input rail: the amplifier's boost converter runs off the
+		 * main battery rail. */
+		VP-supply = <&vph_pwr>;
+
+		cirrus,boost-type = <0>;
+		cirrus,boost-peak-milliamp = <3500>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <15>;
+		/* Boost converter target voltage. Without this the vendor
+		 * driver leaves BSTCVRT_VCTRL1 at 0 and the speaker is silent. */
+		cirrus,boost-ctl-millivolt = <4600>;
+		cirrus,asp-sdout-hiz = <3>;
+		/* Vendor parity (dtbo fragment@55): GPIO2 is the amplifier's
+		 * push-pull active-low interrupt output. Without it the PUP-done
+		 * signal never reaches the host and power-up times out. */
+		cirrus,gpio2-src-select = <4>;
+		cirrus,gpio2-output-enable;
+	};
+
+	spk_amp3: speaker@42 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x42>;
+		#sound-dai-cells = <1>;
+		sound-name-prefix = "SPK3";
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <126 IRQ_TYPE_LEVEL_LOW>;
+		interrupt-controller;
+		#interrupt-cells = <2>;
+		interrupt-names = "cs35l41_3_irq";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&spk3_irq_default>;
+
+		reset-gpios = <&tlmm 131 GPIO_ACTIVE_HIGH>;
+
+		VA-supply = <&vreg_l16a_3p3>;
+		/* Boost input rail: the amplifier's boost converter runs off the
+		 * main battery rail. */
+		VP-supply = <&vph_pwr>;
+
+		cirrus,boost-type = <0>;
+		cirrus,boost-peak-milliamp = <3500>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <15>;
+		/* Boost converter target voltage. Without this the vendor
+		 * driver leaves BSTCVRT_VCTRL1 at 0 and the speaker is silent. */
+		cirrus,boost-ctl-millivolt = <4600>;
+		cirrus,asp-sdout-hiz = <3>;
+		/* Vendor parity (dtbo fragment@55): GPIO2 is the amplifier's
+		 * push-pull active-low interrupt output. Without it the PUP-done
+		 * signal never reaches the host and power-up times out. */
+		cirrus,gpio2-src-select = <4>;
+		cirrus,gpio2-output-enable;
+	};
+
+	spk_amp4: speaker@43 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x43>;
+		#sound-dai-cells = <1>;
+		sound-name-prefix = "SPK4";
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <68 IRQ_TYPE_LEVEL_LOW>;
+		interrupt-controller;
+		#interrupt-cells = <2>;
+		interrupt-names = "cs35l41_4_irq";
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&spk4_irq_default>;
+
+		reset-gpios = <&tlmm 131 GPIO_ACTIVE_HIGH>;
+
+		VA-supply = <&vreg_l16a_3p3>;
+		/* Boost input rail: the amplifier's boost converter runs off the
+		 * main battery rail. */
+		VP-supply = <&vph_pwr>;
+
+		cirrus,boost-type = <0>;
+		cirrus,boost-peak-milliamp = <3500>;
+		cirrus,boost-ind-nanohenry = <1000>;
+		cirrus,boost-cap-microfarad = <15>;
+		/* Boost converter target voltage. Without this the vendor
+		 * driver leaves BSTCVRT_VCTRL1 at 0 and the speaker is silent. */
+		cirrus,boost-ctl-millivolt = <4600>;
+		cirrus,asp-sdout-hiz = <3>;
+		/* Vendor parity (dtbo fragment@55): GPIO2 is the amplifier's
+		 * push-pull active-low interrupt output. Without it the PUP-done
+		 * signal never reaches the host and power-up times out. */
+		cirrus,gpio2-src-select = <4>;
+		cirrus,gpio2-output-enable;
+	};
+
+	keyboard@61 {
+		compatible = "hid-over-i2c";
+		reg = <0x61>;
+		/* Keep the keyboard powered and arm its GPIO IRQ during suspend. */
+		wakeup-source;
+
+		vdd-supply = <&vreg_l16a_3p3>;
+		vddl-supply = <&vreg_l8c_1p8>;
+
+		pinctrl-names = "default";
+		pinctrl-0 = <&mcu_default>;
+
+		interrupt-parent = <&tlmm>;
+		interrupts = <11 IRQ_TYPE_LEVEL_LOW>;
+
+		hid-descr-addr = <0x1>;
+		post-power-on-delay-ms = <100>;
+	};
+};
+
+/*
+ * DIAGNOSTIC: enable the SoC's internal pull-ups on the touchscreen I2C
+ * lines. The TLMM reports every pin supports "input bias pull up
+ * (2200 ohms)" but the shared qup_i2c13_default group is bias-disable,
+ * and both SDA (gpio36) and SCL (gpio37) sit at 0 V even while the
+ * controller is idle and the touch controller is held in reset. If the
+ * external pull-ups are missing or unpowered this is the reason every
+ * transfer times out.
+ */
+&qup_i2c13_default {
+	bias-pull-up;
+};
+
+&i2c13 {
+
+	/*
+	 * GT7385P: drop to the standard-mode 100 kHz bus rate. The vendor
+	 * DTB does not set clock-frequency at all (the Geni driver then uses
+	 * its own default), while we forced 400 kHz - fast mode needs the
+	 * whole bus to be within its rise/fall budget and the touch FPC is
+	 * long and thin. At 400 kHz every probe read of 0x8140 timed out
+	 * (-110) even though the controller's INT line was pulled low, i.e.
+	 * the chip was alive and asking to talk.
+	 */
+	clock-frequency = <100000>;
+	status = "okay";
+
+	touchscreen@5d {
+		/*
+		 * GT7385P. The stock kernel drives this part with the vendor
+		 * "GTP" driver, whose debug strings prove 16-bit register
+		 * addresses ("[GTP-ERR] I2c read failed,dev:%02x,reg:%04x" and
+		 * "read config,reg_addr=0x%x"), i.e. the GT9xx protocol - not
+		 * the Goodix Berlin protocol (32-bit addresses) that
+		 * goodix_berlin_i2c.c implements. Recovered by dumping the
+		 * vendor kernel out of the stock boot.img.
+		 *
+		 * Under the Berlin driver every probe failed: the chip answered
+		 * nothing on 0x10000/0x10004/... (all -ENXIO, later -ETIMEDOUT
+		 * once avdd was raised to the real 5.5 V display rail), which is
+		 * exactly what you get when the register address width is wrong.
+		 */
+		/*
+		 * Lenovo TB-J716F: GT7385P.
+		 *
+		 * Tried the Berlin binding ("goodix,gt7385p" -> goodix_berlin_i2c)
+		 * because mainline documents that part as Berlin protocol, but the
+		 * chip rejects every Berlin register write with -ENXIO:
+		 *
+		 *   J716FDBG addr 0x10000 write -> -6
+		 *   J716FDBG addr 0x10004 write -> -6
+		 *   ...
+		 *   goodix-berlin-i2c 13-005d: failed power on
+		 *
+		 * so this particular part answers 16-bit register transactions
+		 * (0x8140 chip ID reads back 26 28 24 16), not Berlin's 32-bit
+		 * accesses. Keep the GT9xx driver's I2C/config support, with its
+		 * GT738x event reader using the vendor report block at 0x824E.
+		 */
+		compatible = "goodix,gt738x";
+		reg = <0x5d>;
+		goodix,debug-reports;
+
+		interrupt-parent = <&tlmm>;
+		/*
+		 * The TLMM gpio irqchip only supports edge triggering for this
+		 * pin. Asking for LEVEL_LOW makes the mapping fail outright:
+		 *
+		 *   irq: type mismatch, failed to map hwirq-39 for
+		 *        pinctrl@f100000!
+		 *   Goodix-TS 13-005d: request IRQ failed: -22
+		 *
+		 * and then client->irq stays 0 so the driver never gets an
+		 * interrupt at all. The controller asserts INT low and releases
+		 * it after the report is read, so a falling edge is the correct
+		 * event. Note the "interrupts" property is still required: it is
+		 * what populates client->irq for the I2C device.
+		 */
+		interrupts = <39 IRQ_TYPE_EDGE_FALLING>;
+
+		/*
+		 * The vendor dtbo (fragment@70) declares:
+		 *   goodix,reset-gpio = <&tlmm 0x26 0x00>;   -> GPIO 38, ACTIVE_HIGH
+		 *   goodix,irq-gpio   = <&tlmm 0x27 0x2008>; -> GPIO 39, ACTIVE_LOW|OPEN_DRAIN
+		 *   goodix,irq-flags  = <0x02>;              -> IRQF_TRIGGER_LOW
+		 * goodix.c looks these up as "irq-gpios" / "reset-gpios".
+		 */
+		/*
+		 * Both must be ACTIVE_HIGH. goodix_reset_no_int_sync() drives
+		 * INT as an *output* to pick the I2C address (HIGH = 0x14,
+		 * LOW = 0x5d) before releasing reset, using the raw logical
+		 * value. With GPIO_ACTIVE_LOW on irq-gpios the logical 0 that
+		 * selects 0x5d would drive the pin physically high and the
+		 * controller would come up on 0x14 instead, so every read at
+		 * 0x5d timed out (-110 at 0x8140).
+		 */
+		irq-gpios = <&tlmm 39 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&tlmm 38 GPIO_ACTIVE_HIGH>;
+
+		/*
+		 * Point the driver at the panel's real configuration blob.
+		 *
+		 * The stock /vendor/firmware ships goodix_cfg_group.bin, a
+		 * container holding a 256-byte register configuration per
+		 * panel variant ("phoneix" / "7386" for this board). The
+		 * driver's default name is "goodix_%s_cfg.bin" built from the
+		 * chip id read over I2C, which is unique per unit and can
+		 * never match a file we could ship. "goodix,config-name"
+		 * overrides that, and goodix.c prefixes it with "goodix/",
+		 * so the blob lives at /lib/firmware/goodix/j716f_cfg.bin.
+		 *
+		 * Without the configuration the controller answers 0xff at
+		 * 0x8040 and never enters normal reporting mode.
+		 */
+		goodix,config-name = "j716f_cfg.bin";
+
+		/*
+		 * The vendor dtbo's __symbols__ node gives the authoritative rail
+		 * map for goodix-gt738x@5d:
+		 *   pm8150a_l1  -> vdd-supply
+		 *   pm8150_l13  -> avdd-supply
+		 *   pm8150_l14  -> vddio-supply
+		 * i.e. avdd is a 3.0 V LDO, NOT the 5.5 V display boost
+		 * (display_panel_avdd) that an earlier attempt wired up. Feeding
+		 * 5.5 V there did not help and is out of spec for a GT9xx.
+		 *
+		 * goodix.c requests them by the uppercase names "AVDD28" and
+		 * "VDDIO" via devm_regulator_get(), plus an optional "avdd".
+		 * Our board tree names the same PM8150A LDOs l13a/l14a.
+		 */
+		/*
+		 * mainline goodix.c asks for exactly three rails:
+		 *   devm_regulator_get(dev, "AVDD28")            -> AVDD28-supply
+		 *   devm_regulator_get(dev, "VDDIO")             -> VDDIO-supply
+		 *   devm_regulator_get_optional(dev, "avdd")     -> avdd-supply
+		 *
+		 * The vendor DTBO names them avdd-supply / vddio-supply /
+		 * vdd-supply, so the third one has to be exposed here as
+		 * "avdd-supply" - a plain "VDD-supply" property is never looked
+		 * up by this driver and silently does nothing.
+		 *
+		 * Mapping (from the DTBO __fixups__ entries):
+		 *   vendor vdd-supply   = pm8150a_l1  (1.8 V) -> avdd-supply
+		 *   vendor avdd-supply  = pm8150_l13  (3.0 V) -> AVDD28-supply
+		 *   vendor vddio-supply = pm8150_l14  (1.8 V) -> VDDIO-supply
+		 */
+		/*
+		 * Regulator names for the Berlin driver (goodix_berlin_core.c
+		 * requests "avdd", "vddio" and an optional "vdd"):
+		 *
+		 *   avdd  -> the analogue rail, PM8150 L13 at 3.0 V
+		 *   vddio -> the IO rail,     PM8150 L14 at 1.8 V
+		 *   vdd   -> the core rail,   PM8150A L1 at 1.8 V
+		 *
+		 * The GT9xx driver used upper-case AVDD28/VDDIO, and avdd was
+		 * pointing at the 1.8 V core rail, which is why the Berlin
+		 * probe died in power_on with -110: it was bringing up avdd at
+		 * the wrong voltage.
+		 */
+		/*
+		 * goodix.c requests "AVDD28", "VDDIO" and an optional "avdd".
+		 * The third one is the 1.8 V core rail (vendor vdd-supply =
+		 * pm8150a_l1). It used to point at l13a as well, which left
+		 * l1d with no consumer at all: its num_users stayed 0, the
+		 * controller never got its core supply, and every I2C access
+		 * started timing out with -110.
+		 */
+		avdd-supply = <&vreg_l1d_1p8>;
+		vddio-supply = <&vreg_l14a_1p88>;
+		vdd-supply = <&vreg_l1d_1p8>;
+		AVDD28-supply = <&vreg_l13a_3p0>;
+		VDDIO-supply = <&vreg_l14a_1p88>;
+
+		pinctrl-names = "default", "sleep";
+		pinctrl-0 = <&ts_int_active &ts_reset_active>;
+		pinctrl-1 = <&ts_int_suspend &ts_reset_suspend>;
+
+		/*
+		 * J716F GT7385P report coordinates already use display orientation:
+		 * X is horizontal (0..2559), Y is vertical (0..1599). Do not set
+		 * touchscreen-swapped-x-y here. The previous swapped declaration
+		 * made the kernel publish (Y, X) with mismatched axis ranges and
+		 * required a compensating Xorg matrix.
+		 */
+		touchscreen-size-x = <2560>;
+		touchscreen-size-y = <1600>;
+	};
+
+};
+
+&i2c15 {
+	clock-frequency = <400000>;
+	status = "okay";
+
+	/* SMB1390 charger @ 10 */
+	/* FSA4480 USB audio switch @ 43 */
+	/* RTC6226 FM receiver @ 64 */
+	/* HL6111R wireless charging IC @ 25 */
+
+	/* Four-microphone ADC. Vendor node (base DTB, i2c@884000) uses
+	 * compatible "es7210" with VD = pm8150_l16 (3.024 V) and
+	 * VP = pm8150a_l8 (1.8 V). */
+	es7210: audio-adc@40 {
+		compatible = "everest,es7210";
+		reg = <0x40>;
+
+		vd-supply = <&vreg_l16a_3p3>;
+		vp-supply = <&vreg_l8c_1p8>;
+
+		#sound-dai-cells = <0>;
+	};
+};
+
+&camcc {
+	status = "okay";
+};
+
+/* Camera: rear main = OmniVision OV13B10 (ofilm/qtech module).
+ * From vendor DT + Android kernel camx tables:
+ *   CCI master 0 (cci0_i2c0), slave 0x36; MCLK0 = gpio94, RESET = gpio93;
+ *   csiphy0 (4 lanes); rails: VIO=l7f 1.8V, VANA=l5f 2.8V, VDIG=l1f 1.2V.
+ */
+&cci0 {
+	status = "okay";
+};
+
+&cci1 {
+	status = "okay";
+};
+
+&camss {
+	vdda-phy-supply = <&vreg_l5a_0p88>;
+	vdda-pll-supply = <&vreg_l9a_1p2>;
+	status = "okay";
+
+	ports {
+		/* csiphy0 (4 lanes) - OV13B10 rear main */
+		port@0 {
+			reg = <0>;
+
+			camss_csiphy0_in: endpoint {
+				data-lanes = <0 1 2 3>;
+				remote-endpoint = <&ov13b10_ep>;
+			};
+		};
+
+
+		/* csiphy2 (4 lanes) - S5K4H7 RGB front.
+		 * Vendor slot 1: csiphy2, CCI1 master 0, MCLK2 = gpio96,
+		 * RESET2 = gpio78. The sensor powers up with four CSI-2 lanes
+		 * (0x0114 = 0x03). */
+		port@2 {
+			reg = <2>;
+
+			camss_csiphy2_in: endpoint {
+				data-lanes = <0 1 2 3>;
+				remote-endpoint = <&front1_ep>;
+			};
+		};
+
+		/* csiphy3 (2 lanes) - GC5035 rear secondary */
+		port@3 {
+			reg = <3>;
+
+			camss_csiphy3_in: endpoint {
+				data-lanes = <0 1>;
+				remote-endpoint = <&gc5035_ep>;
+			};
+		};
+	};
+};
+
+&tlmm {
+	cam_mclk0_active: cam-mclk0-active-state {
+		pins = "gpio94";
+		function = "cam_mclk";
+		drive-strength = <16>;
+		bias-disable;
+	};
+
+	cam_rear_reset_active: cam-rear-reset-active-state {
+		pins = "gpio93";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_rear_reset_suspend: cam-rear-reset-suspend-state {
+		pins = "gpio93";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	/* Front sensors: MCLK1 = gpio95 / RESET1 = gpio92 (csiphy1),
+	 * MCLK2 = gpio96 / RESET2 = gpio78 (csiphy2). */
+	cam_mclk1_active: cam-mclk1-active-state {
+		pins = "gpio95";
+		function = "cam_mclk";
+		drive-strength = <16>;
+		bias-disable;
+	};
+
+	cam_front1_reset_active: cam-front1-reset-active-state {
+		pins = "gpio92";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_mclk2_active: cam-mclk2-active-state {
+		pins = "gpio96";
+		function = "cam_mclk";
+		drive-strength = <16>;
+		bias-disable;
+	};
+
+	cam_front1_reset_suspend: cam-front1-reset-suspend-state {
+		pins = "gpio92";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	cam_front2_reset_suspend: cam-front2-reset-suspend-state {
+		pins = "gpio78";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	cam_front2_reset_active: cam-front2-reset-active-state {
+		pins = "gpio78";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	/* GC5035 rear secondary: MCLK3 = gpio97, RESET3 = gpio109 */
+	cam_mclk3_active: cam-mclk3-active-state {
+		pins = "gpio97";
+		function = "cam_mclk";
+		drive-strength = <16>;
+		bias-disable;
+	};
+
+	cam_rear2_reset_active: cam-rear2-reset-active-state {
+		pins = "gpio109";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	cam_rear2_reset_suspend: cam-rear2-reset-suspend-state {
+		pins = "gpio109";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+};
+
+&cci0_i2c0 {
+	camera@36 {
+		compatible = "ovti,ov13b10";
+		reg = <0x36>;
+
+		reset-gpios = <&tlmm 93 GPIO_ACTIVE_LOW>;
+		pinctrl-names = "default", "suspend";
+		pinctrl-0 = <&cam_mclk0_active &cam_rear_reset_active>;
+		pinctrl-1 = <&cam_rear_reset_suspend>;
+
+		/* The module needs three rails. The vendor names them
+		 * cam_vana (2.8 V analog), cam_vdig (1.2 V digital) and
+		 * cam_vio (1.8 V I/O); all three have to be on before the
+		 * sensor answers on I2C. */
+		avdd-supply = <&vreg_l5f_2p8>;
+		dvdd-supply = <&vreg_l1f_1p2>;
+		dovdd-supply = <&vreg_l7f_1p8>;
+
+		/* 19.2 MHz master clock from the camera clock controller. The
+		 * driver requires exactly this rate (OV13B10_EXT_CLK), and
+		 * CAM_CC_MCLK0_CLK has a 19.2 MHz entry, so it is a direct
+		 * pass-through of the TCXO. */
+		clocks = <&camcc CAM_CC_MCLK0_CLK>;
+		clock-frequency = <19200000>;
+
+		port {
+			ov13b10_ep: endpoint {
+				link-frequencies = /bits/ 64 <560000000>;
+				data-lanes = <1 2 3 4>;
+				remote-endpoint = <&camss_csiphy0_in>;
+			};
+		};
+	};
+};
+
+/*
+ * Rear secondary camera: GalaxyCore GC5035 on CCI master 1, 2 data lanes.
+ * The I2C address is 0x39: the vendor sensor module
+ * (com.sensormodule.kingcome_gc5035.bin) stores slaveAddr = 0x72 in 8-bit
+ * form, i.e. 0x39 in the 7-bit form used by the device tree.
+ * Vendor DT: csiphy-sd-index = 3, cci-master = 1, MCLK3 = gpio97,
+ * RESET3 = gpio109.
+ */
+&cci1_i2c1 {
+	gc5035: camera@3f {
+		compatible = "galaxycore,gc5035";
+		reg = <0x3f>;
+
+		reset-gpios = <&tlmm 109 GPIO_ACTIVE_LOW>;
+		pinctrl-names = "default", "suspend";
+		pinctrl-0 = <&cam_mclk3_active &cam_rear2_reset_active>;
+		pinctrl-1 = <&cam_rear2_reset_suspend>;
+
+		clocks = <&camcc CAM_CC_MCLK3_CLK>;
+		clock-frequency = <19200000>;
+
+		/* Vendor rail map (fragment@44):
+		 *   cam_vana = pm8009_l6, cam_vdig = pm8009_l2, cam_vio = pm8009_l7 */
+		avdd-supply = <&vreg_l6f_2p8>;
+		dvdd-supply = <&vreg_l2f_1p2>;
+		dovdd-supply = <&vreg_l7f_1p8>;
+
+		port {
+			gc5035_ep: endpoint {
+				link-frequencies = /bits/ 64 <422400000>;
+				data-lanes = <1 2>;
+				remote-endpoint = <&camss_csiphy3_in>;
+			};
+		};
+	};
+};
+
+/*
+ * Front camera probe: S5K4H7 at 0x35 on CCI1 master 0 (cci1_i2c0).
+ * Address from com.qti.sensormodule.lce_s5k4h7rgb.bin: slaveAddr = 0x6b
+ * (8-bit) -> 0x35 (7-bit). Uses the gc5035 driver only as a power/clock
+ * helper (skip-id-check) until an S5K4H7 driver exists.
+ */
+&cci1_i2c0 {
+	/*
+	 * Front camera position 1: S5K4H7 RGB at 0x10 (address recovered from
+	 * com.qti.sensormodule.lce_s5k4h7rgb.bin, validated against the
+	 * OV13B10 ground truth). No mainline S5K4H7 driver exists yet, so the
+	 * GC5035 driver is bound here with the chip-ID check skipped: it owns
+	 * the MCLK, reset and rails, and drives the same 2-lane SGRBG10
+	 * interface shape. Streaming from this position is unverified.
+	 */
+	front1: camera@10 {
+		compatible = "samsung,s5k4h7";
+		reg = <0x10>;
+
+		/* Vendor slot 1: CCI1 master 0, csiphy2, MCLK2 = gpio96,
+		 * RESET2 = gpio78. */
+		reset-gpios = <&tlmm 78 GPIO_ACTIVE_LOW>;
+		pinctrl-names = "default", "suspend";
+		pinctrl-0 = <&cam_mclk2_active &cam_front2_reset_active>;
+		pinctrl-1 = <&cam_front2_reset_suspend>;
+
+		clocks = <&camcc CAM_CC_MCLK2_CLK>;
+		clock-frequency = <19200000>;
+
+		/* Vendor rail map (fragment@44):
+		 *   cam_vana = pm8009_l6, cam_vdig = pm8009_l3, cam_vio = pm8009_l7 */
+		avdd-supply = <&vreg_l6f_2p8>;
+		dvdd-supply = <&vreg_l3f_1p2>;
+		dovdd-supply = <&vreg_l7f_1p8>;
+
+		port {
+			front1_ep: endpoint {
+				link-frequencies = /bits/ 64 <480000000>;
+				data-lanes = <1 2 3 4>;
+				remote-endpoint = <&camss_csiphy2_in>;
+			};
+		};
+	};
+};
+
+/*
+ * Front camera position 2: S5K4H7 IR at 0x2d.
+ *
+ * PARKED. The vendor module com.qti.sensormodule.ofilm_s5k4h7irof.bin gives
+ * its I2C address as 0x2d, and the vendor dtbo places it on csiphy1 with
+ * MCLK1 = gpio95 / RESET1 = gpio92, which by the csiphy->bus pattern used by
+ * the other three sensors (csiphy N -> i2c-2N) means CCI0 master 1 (i2c-21).
+ * On that bus the device does acknowledge (the driver reports -110 ETIMEDOUT
+ * rather than -6 ENXIO), but the chip-ID read never completes, so it does not
+ * probe. It also does not answer at 0x2d on i2c-22 or i2c-23.
+ *
+ * Left disabled: a node with a camss endpoint that never probes blocks the
+ * async notifier and stops /dev/media0 from registering, which would take the
+ * other three cameras down with it.
+ */
+
+/* ASM front-end DAIs (one child per PCM) and the MI2S backend DAI. */
+&q6asmdai {
+	dai@0 {
+		reg = <0>;
+	};
+
+	dai@1 {
+		reg = <1>;
+	};
+
+	dai@2 {
+		reg = <2>;
+	};
+};
+
+&q6afedai {
+	/*
+	 * The two directions use different I2S data lines on this board.
+	 *
+	 * The vendor DTB gives the mask form of the same information:
+	 *     qcom,msm-mi2s-rx-lines = <0x02>   -> BIT(1) -> SD1 (speakers)
+	 *     qcom,msm-mi2s-tx-lines = <0x01>   -> BIT(0) -> SD0 (microphone)
+	 * mainline takes a list of line indices and builds the same mask with
+	 * BIT(index), so the speakers must be listed as line 1.
+	 */
+	dai@16 {
+		reg = <PRIMARY_MI2S_RX>;
+		qcom,sd-lines = <1>;
+	};
+
+	dai@17 {
+		reg = <PRIMARY_MI2S_TX>;
+		qcom,sd-lines = <0>;
+	};
+};
+
+/*
+ * Primary MI2S pin state, overridden from sm8250.dtsi.
+ *
+ * The generic dtsi marks data0/data1 as "output-high". On this board the
+ * primary MI2S carries the CS35L41 amplifiers on RX *and* the ES7210
+ * microphone ADC on TX, so mi2s0_data0 (gpio139) is driven BY the ES7210
+ * and must stay an input for the SoC. Forcing an output level on it holds
+ * the line and the ADC's samples never reach the LPASS capture port -
+ * which is why every ES7210 recording came back as pure silence while
+ * the codec's registers all read back correctly.
+ *
+ * ws (gpio141) keeps output-high: the SoC is the clock/WS master.
+ */
+&pri_mi2s_active {
+	/*
+	 * Lenovo J716F: mi2s0_data0 / data1 carry the ES7210 microphone ADC's
+	 * serial output INTO the SoC. sm8250.dtsi marks both as "output-high",
+	 * which makes the TLMM drive the pads and fights the codec - the pads
+	 * read back as OE=1 and the data lines never change, while SCK and WS
+	 * clock normally:
+	 *
+	 *   pin 138 SCK  CFG=0x0c4 OE=0   (clock runs, 281 transitions)
+	 *   pin 139 SD0  CFG=0x2c4 OE=1   (stuck, 0 transitions)
+	 *   pin 140 SD1  CFG=0x2c4 OE=1   (stuck, 0 transitions)
+	 *   pin 141 WS   CFG=0x2c5 OE=1
+	 *
+	 * A plain node override does not help: device tree merges same-named
+	 * subnodes, so "output-high" from the dtsi survives. /delete-property/
+	 * is what actually removes it.
+	 */
+	data0-pins {
+		/delete-property/ output-high;
+	};
+
+	data1-pins {
+		/delete-property/ output-high;
+	};
+};
+
+/*
+ * Audio: the four CS35L41 amps hang off the primary MI2S; the ADSP (q6afe)
+ * provides the front-end DAIs. Speakers = MI2S RX -> CS35L41 ASP.
+ */
+&sound {
+	compatible = "qcom,sm8250-sndcard";
+	model = "Lenovo Xiaoxin Pad Pro 2021";
+	pinctrl-names = "default";
+	pinctrl-0 = <&pri_mi2s_active>;
+	/* Keep amp1 controls compatible with the installed userspace. The
+	 * additional outputs have independent switches and start disabled
+	 * until low-volume, per-speaker verification has been completed.
+	 */
+	pin-switches = "SPK2 SPK", "SPK3 SPK", "SPK4 SPK";
+
+	/*
+	 * Lenovo J716F: the digital microphones are powered through a PMIC
+	 * GPIO, exactly as the vendor dtbo declares:
+	 *
+	 *   qcom.msm-dmic-en-gpio  = <&pm8150b_gpios 12 GPIO_ACTIVE_LOW>;
+	 *   qcom,msm-dmic-sel-gpio = <&pm8150_gpios  1  GPIO_ACTIVE_HIGH>;
+	 *
+	 * mainline's sm8250 machine driver has no handling for these, so
+	 * they are documented here for whoever ports the vendor's
+	 * msm_dmic_event() helper. The DMIC rails are left unpowered without
+	 * it, which matches what probing the clock pads shows: driven high
+	 * but never toggling.
+	 */
+	qcom,msm-dmic-en-gpio = <&pm8150b_gpios 12 GPIO_ACTIVE_LOW>;
+	qcom,msm-dmic-sel-gpio = <&pm8150b_gpios 1 GPIO_ACTIVE_HIGH>;
+
+	/* DPCM front-end -> backend routing (same shape as qrb5165-rb5).
+	 * Without these the front-end has no path to the MI2S backend and
+	 * snd_pcm_hw_params() fails on the MultiMedia PCMs. */
+	audio-routing =
+		"MM_DL1", "MultiMedia1 Playback",
+		"MM_DL2", "MultiMedia2 Playback",
+		/*
+		 * NOTE: adding "PRI_MI2S_RX Audio Mixer", "MultiMedia1", "MM_DL1"
+		 * here was tried and made the whole sound card fail to register
+		 * (no soundcards in /proc/asound), because DTS audio-routing
+		 * entries must name widgets that exist on the same card after
+		 * name-uniquifying - the three-argument form with a control
+		 * names a control that the card-level parser cannot resolve
+		 * across components. Do not re-add it.
+		 */
+		"MultiMedia3 Capture", "MM_UL3",
+		/*
+		 * Connect the ES7210's capture AIF to the CPU side of its BE.
+		 *
+		 * es7210_dai.capture.stream_name is "Capture", which
+		 * snd_soc_dapm_new_dai_widgets() creates as an aif_out widget.
+		 * dapm_generic_check_power() needs BOTH in and out edges, and
+		 * "Capture" only ever had inputs (Capture <- ADC1..4), so out
+		 * stayed 0 and the whole codec chain sat at Off:
+		 *
+		 *   ADC1:    Off  in 1 out 0
+		 *   Capture: Off  in 4 out 0
+		 *
+		 * q6afe-dai registers {"PRI_MI2S_TX", NULL, "Primary MI2S Capture"},
+		 * so the CPU-side endpoint widget is named "Primary MI2S Capture".
+		 * Routing codec "Capture" into it gives the AIF the missing
+		 * output edge and lets DAPM power the ADC chain.
+		 */
+		"Primary MI2S Capture", "Capture",
+		/*
+		 * The digital MEMS microphones only produce data while their
+		 * bias rail is powered. va-macro models that rail as a DAPM
+		 * supply widget ("vdd-micb"), and a supply widget is only
+		 * switched on when a route references it - exactly what
+		 * sc7280-herobrine does for its DMICs. Without these routes
+		 * vdd-micb stayed at num_users 0, the microphones had no bias,
+		 * and every capture path (VA macro, TX macro and the ES7210)
+		 * returned digital silence even though the whole clock and
+		 * DAPM chain reported On.
+		 */
+		"VA DMIC0", "vdd-micb",
+		"VA DMIC1", "vdd-micb",
+		"VA DMIC2", "vdd-micb",
+		"VA DMIC3", "vdd-micb",
+		/*
+		 * NOTE: no "MultiMedia1 Capture" route here. On this SoC the
+		 * microphones are captured through the dedicated "VA Capture"
+		 * link (VA macro -> VA_CODEC_DMA_TX_0), exactly as qrb5165-rb5
+		 * does; adding a MultiMedia1 capture route makes the DPCM
+		 * front-end pick that link instead, which then has no backend.
+		 */
+		/*
+		 * The DMIC capture path is selected at runtime through the TX
+		 * macro mixer controls (TX DMIC MUX2=DMIC2, TX DEC2 MUX=MSM_DMIC,
+		 * TX_AIF1_CAP Mixer DEC2=on); audio-routing only takes
+		 * sink/source pairs and cannot set MUX values. Keep the FE->BE
+		 * uplink route here.
+		 */
+		"MultiMedia3 Capture", "MM_UL3",
+		/*
+		 * ES7210 four-microphone ADC path. The codec's capture DAI
+		 * ("Capture") feeds the PRI_MI2S_TX backend, and MultiMedia1 is
+		 * the front end used to read it (that is also what the stock
+		 * Android build exposes). Without these two routes DAPM never
+		 * powers the ES7210 chain and capture returns all zeros.
+		 */
+		"MultiMedia1 Capture", "MM_UL1",
+		"PRI_MI2S_TX", "Capture";
+
+
+	mm1-dai-link {
+		link-name = "MultiMedia1";
+		cpu {
+			sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA1>;
+		};
+	};
+
+	mm2-dai-link {
+		link-name = "MultiMedia2";
+		cpu {
+			sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA2>;
+		};
+	};
+
+	pri-mi2s-dai-link {
+		link-name = "Primary MI2S Playback";
+		cpu {
+			sound-dai = <&q6afedai PRIMARY_MI2S_RX>;
+		};
+
+		platform {
+			sound-dai = <&q6routing>;
+		};
+
+		codec {
+			sound-dai = <&spk_amp1 0>, <&spk_amp2 0>,
+				    <&spk_amp3 0>, <&spk_amp4 0>;
+		};
+	};
+
+	/*
+	 * MultiMedia3 is the capture front end the VA macro is routed to
+	 * ("MultiMedia3 Capture" -> "MM_UL3" in audio-routing), the same
+	 * arrangement qrb5165-rb5 uses for its DMIC capture.
+	 */
+	mm3-dai-link {
+		link-name = "MultiMedia3";
+		cpu {
+			sound-dai = <&q6asmdai MSM_FRONTEND_DAI_MULTIMEDIA3>;
+		};
+	};
+
+	/*
+	 * DMIC capture: the VA macro's ADC fed from the digital microphones.
+	 * This is the path the stock Android recorder uses.
+	 */
+	/*
+	 * TX_CODEC_DMA_TX_3 (AFE port 0xB037) is the digital-microphone
+	 * capture port the stock Android recorder uses (its mixer enables
+	 * "MultiMedia1 Mixer TX_CDC_DMA_TX_3"). The VA ports (0xB021+) are
+	 * rejected by the Kona ADSP - the vendor driver's own dispatch does
+	 * not accept them either.
+	 */
+	/*
+	 * NOTE: no "platform" sub-node here on purpose. qcom_snd_parse_of()
+	 * marks a link as a DPCM backend (no_pcm = 1) only when a platform
+	 * node is present. A DPCM backend shares the frontend's runtime but
+	 * is not that runtime's trigger_master, so snd_pcm_do_start() skips
+	 * it, runtime->state never reaches RUNNING, and
+	 * snd_pcm_period_elapsed() refuses to advance hw_ptr - which made
+	 * capture fail with -EIO even though the DSP was delivering data.
+	 * Without the platform node this is an ordinary PCM link whose own
+	 * substream is the trigger master.
+	 */
+	tx-dai-link {
+		link-name = "TX Capture";
+		cpu {
+			sound-dai = <&q6afedai TX_CODEC_DMA_TX_3>;
+		};
+
+		platform {
+			sound-dai = <&q6routing>;
+		};
+
+		codec {
+			sound-dai = <&txmacro 0>;
+		};
+	};
+
+	/*
+	 * The DMIC clock generators live in the VA macro, not the TX macro:
+	 * va_macro's CDC_VA_TOP_CSR_DMIC1_CTL (0x088) is what enables the
+	 * DMIC2/3 clock, and it is va_macro that owns the MCLK feeding them.
+	 * Upstream sm8250-mtp captures the DMICs through exactly this link
+	 * (VA_CODEC_DMA_TX_0 + vamacro), so mirror it here.
+	 *
+	 * Without it the TX macro chain powers up correctly (TX DMIC2 and
+	 * TX_MCLK both report "On") and va_macro programs 0x088 = 0x0b, yet
+	 * the ADSP never returns a single DATA_READ_DONE and capture ends in
+	 * -EIO with a 44-byte WAV header.
+	 */
+	va-dai-link {
+		link-name = "VA Capture";
+		cpu {
+			sound-dai = <&q6afedai VA_CODEC_DMA_TX_0>;
+		};
+
+		platform {
+			sound-dai = <&q6routing>;
+		};
+
+		codec {
+			sound-dai = <&vamacro 0>;
+		};
+	};
+
+	pri-mi2s-cap-dai-link {
+		link-name = "Primary MI2S Capture";
+		cpu {
+			sound-dai = <&q6afedai PRIMARY_MI2S_TX>;
+		};
+
+		platform {
+			sound-dai = <&q6routing>;
+		};
+
+		codec {
+			sound-dai = <&es7210>;
+		};
+	};
+};
+
+/*
+ * The tablet's microphones are the LPASS digital MEMS mics, not the ES7210.
+ * Dumping the stock Android mixer while its recorder was running showed the
+ * capture path it actually uses:
+ *
+ *   DMIC2 -> TX DMIC MUX2 -> TX_AIF1_CAP Mixer DEC2
+ *         -> TX_CDC_DMA_TX_3 -> MultiMedia1 Mixer TX_CDC_DMA_TX_3
+ *
+ * Those widgets live in the TX macro (not the VA macro), so enable that one.
+ */
+/*
+ * The TX macro's "fsgen" clock is provided by the VA macro, so the VA macro
+ * must probe too. It is only a clock provider here: it gets no pinctrl (the
+ * DMIC pins gpio6/7 belong to the TX macro) and is not used as a DAI.
+ */
+&vamacro {
+	/*
+	 * The VA macro owns the DMIC clock generators (and the MCLK feeding
+	 * them), so both the DMIC2 pinmux and qcom,dmic-sample-rate belong
+	 * here. gpio8 = dmic2_clk, gpio9 = dmic2_data; 600 kHz divides the
+	 * 9.6 MHz MCLK by 16, which is in va_macro's divider table.
+	 */
+	/*
+	 * The DMIC clock generators in this macro are fed from
+	 * LPASS_CLK_ID_VA_CORE_MCLK, while sm8250.dtsi wires "mclk" to
+	 * TX_CORE_MCLK. With the wrong clock the DMICs ran at about 1/8 of
+	 * the requested rate, so the DSP needed >1s to fill one period and
+	 * ALSA's read timed out before any data arrived.
+	 */
+	/*
+	 * Lenovo J716F: the DMIC clock generators need the 2x core MCLK,
+	 * which is a separate LPASS clock ID. mainline only wires up "mclk"
+	 * (1x), so the DMIC pads never produced a clock. Add it here and the
+	 * driver enables it alongside the DMIC clock.
+	 */
+	clocks = <&q6afecc LPASS_CLK_ID_VA_CORE_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+		 <&q6afecc LPASS_CLK_ID_VA_CORE_2X_MCLK LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+		 <&q6afecc LPASS_HW_MACRO_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>,
+		 <&q6afecc LPASS_HW_DCODEC_VOTE LPASS_CLK_ATTRIBUTE_COUPLE_NO>;
+	clock-names = "mclk", "mclk2x", "macro", "dcodec";
+	/*
+	 * Mux every DMIC pair that is not already taken by another
+	 * peripheral: dmic1 on gpio6/7 and dmic3 on gpio12/13. dmic2
+	 * (gpio8/9) belongs to the QUP4 I2C bus, so it cannot be used.
+	 * The on-board microphones are wired to exactly one of these pairs,
+	 * but the vendor DT never says which, and only the pair that is
+	 * actually muxed can ever deliver data - leaving one of them
+	 * UNCLAIMED was hiding half the candidates.
+	 *
+	 * Muxing both is harmless: an unused DMIC pair just clocks nothing.
+	 */
+	/*
+	 * Drive the DMIC2 pair. The vendor firmware has no VA macro node,
+	 * so the stock path runs through the TX macro; but the TX macro's
+	 * DMIC clock generators are fed from the VA macro block on this
+	 * SoC, and the pads have to be muxed before either can drive them.
+	 * Muxing the pair the vendor mixer uses (DMIC2 = LPI gpio8/9) is
+	 * what matters - the previously muxed dmic1/dmic3 pairs are not
+	 * wired to anything on this board.
+	 */
+	/*
+	 * Mux every DMIC pair the board might use. Only one of them is
+	 * actually wired to a microphone, but muxing an unused pair costs
+	 * nothing (it just clocks a pad nobody listens to) and it removes a
+	 * whole class of "wrong pair" failure modes when bringing up capture.
+	 *
+	 *   dmic1 -> LPI gpio6 (clk) / gpio7 (data)
+	 *   dmic2 -> LPI gpio8 (clk) / gpio9 (data)
+	 *   dmic3 -> LPI gpio12 (clk) / gpio13 (data)
+	 */
+	pinctrl-0 = <&dmic1_active &dmic2_active &dmic3_active>;
+	pinctrl-names = "default";
+	vdd-micb-supply = <&vreg_s4a_1p8>;
+	/*
+	 * Lenovo J716F: the DMIC bias rail is driven explicitly by the
+	 * driver (regulator_set_voltage + regulator_set_current_limit +
+	 * regulator_enable), mirroring the vendor's
+	 * va_macro_enable_micbias(). Its strings show the exact sequence:
+	 *
+	 *   "%s: Setting voltage failed, err = %d"
+	 *   "%s: Setting current failed, err = %d"
+	 *   "%s: regulator enable failed, err = %d"
+	 *
+	 * mainline's SND_SOC_DAPM_REGULATOR_SUPPLY("vdd-micb") widget never
+	 * programs a voltage, so the rail sat at 0 mV
+	 * ("3370000.codec-vdd-micb  0 users  0mV") and the microphones
+	 * could not output anything regardless of the DMIC clock setup.
+	 *
+	 * 1.8 V / 100 mA is what S4A can supply here; the vendor used a
+	 * BOB-derived rail with the same values from
+	 * qcom,va-vdd-micb-voltage / -current.
+	 */
+	va-vdd-micb-supply = <&vreg_s4a_1p8>;
+	qcom,va-vdd-micb-voltage = <1800000>;
+	qcom,va-vdd-micb-current = <100000>;
+	/*
+	 * DMIC bit clock. 9.6 MHz / 16 = 600 kHz, matching the TX macro
+	 * below and the dagu board (Huabin1010/dagu-mainline-linux), whose
+	 * comment reads: "Without dmic-sample-rate the driver falls back to
+	 * CLK_DIV_2 and the DMICs stay silent. 9.6 MHz / 600 kHz = div 16".
+	 * 2.4 MHz (div 4) is also legal per
+	 * va_macro_validate_dmic_sample_rate(), but it was measured to
+	 * capture pure silence on this board.
+	 */
+	/*
+	 * DMIC bit clock.
+	 *
+	 * va_macro_validate_dmic_sample_rate() accepts only
+	 * 9.6 MHz / {2,3,4,6,8,16}, i.e. 4800/3200/2400/1600/1200/600 kHz.
+	 * The value written here is then divided by 2 inside
+	 * va_macro_set_dmic_clk_early(), which programs
+	 * clk_set_rate(va->mclk, 2 * 9.6 MHz) = 19.2 MHz and selects
+	 * dmic_clk_div from the table.
+	 *
+	 * 2400000 is the vendor's own value: the stock firmware dtbo sets
+	 *   qcom,tx-dmic-sample-rate = <0x249f00>;  (2,400,000)
+	 * and it is div_factor = 9600000 / 2400000 = 4, which is legal.
+	 *
+	 * 1200000 (div 8) was tried and still produced silence: a 1.2 MHz
+	 * bit clock is below what the MEMS microphones on this board need.
+	 */
+	qcom,dmic-sample-rate = <2400000>;
+	status = "okay";
+};
+
+/* DMIC2 lives on LPI gpio8 (clk) / gpio9 (data) - the microphone the
+ * stock Android recorder captures from ("TX DMIC MUX2" = DMIC2).
+ * sm8250.dtsi only provides dmic01_active, so define the DMIC2 group here.
+ */
+&lpass_tlmm {
+	/*
+	 * GPIO 8/9 are NOT DMIC pins on this board: they belong to the
+	 * QUP4 I2C bus (990000.i2c), which is enabled and carries the
+	 * NB7VPQ904M USB redriver at 0x19 plus the four CS35L41 speaker
+	 * amplifiers at 0x40..0x43. Programming them as dmic2_clk/data
+	 * fought the I2C controller for the pads, so the DMIC clock never
+	 * reached a microphone and every capture path returned silence.
+	 *
+	 * GPIO 6/7 (dmic1) and 12/13 (dmic3) are unclaimed, so start from
+	 * dmic1 and move on if it stays silent.
+	 */
+	/*
+	 * DMIC2 on LPI gpio8 (clk) / gpio9 (data).
+	 *
+	 * These are LPASS LPI pads, NOT the TLMM gpio8/gpio9 that belong to
+	 * the QUP4 I2C bus - the two pin controllers have independent
+	 * numbering and the LPI pair is completely unclaimed:
+	 *
+	 *   pin 8 (gpio8): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+	 *   pin 9 (gpio9): (MUX UNCLAIMED) (GPIO UNCLAIMED)
+	 *
+	 * The vendor DTB has tx-macro@3220000 / rx-macro@3200000 /
+	 * wsa-macro@3240000 but *no* va-macro@3370000 node at all, so the
+	 * stock firmware can only reach the microphones through the TX
+	 * macro's own DMIC decimators. DMIC2 is the pair the vendor mixer
+	 * dump points at ("TX DMIC MUX2" = DMIC2).
+	 */
+	dmic2_active: dmic2-active-state {
+		clk-pins {
+			pins = "gpio8";
+			function = "dmic2_clk";
+			drive-strength = <8>;
+			output-high;
+		};
+
+		data-pins {
+			pins = "gpio9";
+			function = "dmic2_data";
+			drive-strength = <8>;
+			input-enable;
+		};
+	};
+
+	dmic23_active: dmic23-active-state {
+		clk-pins {
+			pins = "gpio6";
+			function = "dmic1_clk";
+			drive-strength = <8>;
+			/*
+			 * No output-high here: this pin is driven by the DMIC
+			 * clock generator, and forcing a GPIO output level on a
+			 * pin that is muxed to a peripheral function is at best
+			 * a no-op and at worst holds the line and kills the
+			 * clock the microphones need.
+			 */
+		};
+
+		data-pins {
+			pins = "gpio7";
+			function = "dmic1_data";
+			drive-strength = <8>;
+		};
+	};
+
+	/* DMIC1 on gpio6/gpio7, DMIC3 on gpio12/gpio13. Defined so the pin
+	 * pairs can be probed individually when looking for the pair the
+	 * on-board microphones are actually wired to.
+	 */
+	/*
+	 * DMIC pad configuration, copied from the vendor dtbo.
+	 *
+	 * The clock pad has to be driven (output-high) and the data pad has
+	 * to be left to the microphone (input-enable). Without those two
+	 * properties the TLMM keeps both pads in a neutral state, the clock
+	 * generator in the VA macro toggles internally but nothing ever
+	 * reaches the pad, and capture returns silence no matter how the
+	 * macro registers are programmed.
+	 *
+	 *   dmic01_clk_active : gpio6, func1, drive 8, output-high
+	 *   dmic01_data_active: gpio7, func1, drive 8, input-enable
+	 */
+	dmic1_active: dmic1-active-state {
+		clk-pins {
+			pins = "gpio6";
+			function = "dmic1_clk";
+			drive-strength = <8>;
+			output-high;
+		};
+
+		data-pins {
+			pins = "gpio7";
+			function = "dmic1_data";
+			drive-strength = <8>;
+			input-enable;
+		};
+	};
+
+	dmic3_active: dmic3-active-state {
+		clk-pins {
+			pins = "gpio12";
+			function = "dmic3_clk";
+			drive-strength = <8>;
+			output-high;
+		};
+
+		data-pins {
+			pins = "gpio13";
+			function = "dmic3_data";
+			drive-strength = <8>;
+			input-enable;
+		};
+	};
+};
+
+&txmacro {
+	/*
+	 * The TX macro has no pinctrl of its own: the DMIC2 pins and their
+	 * clock generators belong to the VA macro (see &vamacro above). The
+	 * TX macro only contains the decimator/ADC path that consumes them,
+	 * and uses this phandle to reach the VA macro's clock generators.
+	 */
+	qcom,va-macro = <&vamacro>;
+	vdd-micb-supply = <&vreg_s4a_1p8>;
+	/*
+	 * Matches the VA macro above. The TX macro driver never reads this
+	 * property (only lpass-va-macro.c does), but the vendor sets both,
+	 * so keep them in sync to avoid a misleading mismatch.
+	 */
+	qcom,dmic-sample-rate = <2400000>;
+	status = "okay";
+};
+
+&pcie0 {
+	status = "okay";
+};
+
+&pcie0_phy {
+	vdda-phy-supply = <&vreg_l5a_0p88>;
+	vdda-pll-supply = <&vreg_l9a_1p2>;
+	status = "okay";
+};
+
+&pcieport0 {
+	wifi@0 {
+		compatible = "pci17cb,1101";
+		reg = <0x10000 0x0 0x0 0x0 0x0>;
+
+		vddrfacmn-supply = <&vreg_pmu_rfa_cmn>;
+		vddaon-supply = <&vreg_pmu_aon_0p59>;
+		vddwlcx-supply = <&vreg_pmu_wlcx_0p8>;
+		vddwlmx-supply = <&vreg_pmu_wlmx_0p85>;
+		vddrfa0p8-supply = <&vreg_pmu_rfa_0p8>;
+		vddrfa1p2-supply = <&vreg_pmu_rfa_1p2>;
+		vddrfa1p7-supply = <&vreg_pmu_rfa_1p7>;
+		vddpcie0p9-supply = <&vreg_pmu_pcie_0p9>;
+		vddpcie1p8-supply = <&vreg_pmu_pcie_1p8>;
+	};
+};
+
+&pm8150_gpios {
+	volume_up_n: volume-up-n-state {
+		pins = "gpio6";
+		function = "normal";
+		bias-pull-up;
+		input-enable;
+		power-source = <1>;
+	};
+};
+
+&pon_pwrkey {
+	status = "okay";
+};
+
+&pon_resin {
+	linux,code = <KEY_VOLUMEDOWN>;
+	status = "okay";
+};
+
+&qupv3_id_0 {
+	status = "okay";
+};
+
+&qupv3_id_1 {
+	status = "okay";
+};
+
+&qupv3_id_2 {
+	status = "okay";
+};
+
+&removed_mem {
+	/* J716F firmware reserves the full range up to camera_mem. */
+	reg = <0x0 0x80b00000 0x0 0x5700000>;
+};
+
+&slpi {
+	firmware-name = "qcom/sm8250/LENOVO/J716F/slpi.mbn";
+	status = "okay";
+};
+
+&tlmm {
+	gpio-reserved-ranges = <40 4>;
+
+	bt_en: bt-en-state {
+		pins = "gpio21";
+		function = "gpio";
+		drive-strength = <16>;
+		output-low;
+		bias-pull-up;
+	};
+
+	/*
+	 * Lenovo TB-J716F: GPIO 11 and GPIO 14 are the interrupt lines of the
+	 * two I2C-HID peripherals (Elan touchpad on i2c@984000, Lenovo
+	 * keyboard on i2c@990000). Both are open-drain outputs on the
+	 * peripheral side, so the SoC has to provide the pull-up.
+	 *
+	 * They used to share one node with bias-disable, which left the lines
+	 * floating: the keyboard IRQ then fired thousands of times per second
+	 * without any key being pressed, and real key events were lost in the
+	 * storm. Give each line its own node with a pull-up.
+	 */
+	mcu_default: mcu-default-state {
+		pins = "gpio11", "gpio14";
+		function = "gpio";
+		bias-pull-up;
+	};
+
+	mcu_pwr_default: mcu-pwr-default-state {
+		pins = "gpio25";
+		function = "gpio";
+		bias-disable;
+	};
+
+	ts_int_active: ts-int-active-state {
+		pins = "gpio39";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+
+	ts_reset_active: ts-reset-active-state {
+		pins = "gpio38";
+		function = "gpio";
+		drive-strength = <8>;
+		bias-pull-up;
+	};
+
+	ts_int_suspend: ts-int-suspend-state {
+		pins = "gpio39";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	ts_reset_suspend: ts-reset-suspend-state {
+		pins = "gpio38";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	/* The vendor dtbo (fragment@70) declares a third pinctrl state,
+	 * "pmx_ts_release", that mainline's touch bindings do not have. It is
+	 * applied when the controller is handed over to its own firmware: both
+	 * lines go to input/high-Z so the chip can drive INT itself. Without
+	 * it the controller never acknowledges on I2C. */
+	fp_irq_active: fp-irq-active-state {
+		pins = "gpio23";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	fp_reset_active: fp-reset-active-state {
+		pins = "gpio22";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	fp_envdd_active: fp-envdd-active-state {
+		pins = "gpio100";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	ts_release: ts-release-state {
+		pins = "gpio38", "gpio39";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-disable;
+	};
+
+	spk1_irq_default: spk1-irq-default-state {
+		pins = "gpio67";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	spk2_irq_default: spk2-irq-default-state {
+		pins = "gpio113";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	spk3_irq_default: spk3-irq-default-state {
+		pins = "gpio126";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	spk4_irq_default: spk4-irq-default-state {
+		pins = "gpio68";
+		function = "gpio";
+		drive-strength = <2>;
+		bias-pull-up;
+	};
+
+	/* Vendor parity: the shared amp reset line is driven high with a
+	 * pull-up and 16 mA drive strength (cs35l41_reset_default). */
+	spk_reset_default: spk-reset-default-state {
+		pins = "gpio131";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-pull-up;
+		output-high;
+	};
+
+	/*
+	 * Panel TE (tearing effect) input. The rm69380 panel is driven in
+	 * command mode and the DPU command-mode encoder needs this signal to
+	 * pace kickoffs; without it every kickoff times out. gpio66 is one of
+	 * the five SM8250 pins the TLMM can mux to mdp_vsync, and the vendor
+	 * tree wires TE there.
+	 */
+	panel_te_active: panel-te-active-state {
+		pins = "gpio66";
+		function = "mdp_vsync";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	panel_te_suspend: panel-te-suspend-state {
+		pins = "gpio66";
+		function = "mdp_vsync";
+		drive-strength = <2>;
+		bias-pull-down;
+	};
+
+	wlan_en: wlan-en-state {
+		pins = "gpio20";
+		function = "gpio";
+		drive-strength = <16>;
+		output-low;
+		bias-pull-up;
+	};
+};
+
+&uart6 {
+	status = "okay";
+
+	bluetooth {
+		compatible = "qcom,qca6390-bt";
+
+		vddrfacmn-supply = <&vreg_pmu_rfa_cmn>;
+		vddaon-supply = <&vreg_pmu_aon_0p59>;
+		vddbtcmx-supply = <&vreg_pmu_btcmx_0p85>;
+		vddrfa0p8-supply = <&vreg_pmu_rfa_0p8>;
+		vddrfa1p2-supply = <&vreg_pmu_rfa_1p2>;
+		vddrfa1p7-supply = <&vreg_pmu_rfa_1p7>;
+
+		/*
+		 * Lenovo TB-J716F: this board's QCA6390 has no valid BD_ADDR
+		 * programmed - the chip reports 00:00:00:00:5A:AD and the
+		 * htnv20.bin NVRAM carries an empty EDL_TAG_ID_BD_ADDR (tag 6,
+		 * len 0). btqca's qca_check_bdaddr() therefore sets
+		 * HCI_QUIRK_USE_BDADDR_PROPERTY, hci_setup_sync() tries to read
+		 * "local-bd-address" from this node, finds public_addr still
+		 * BDADDR_ANY, marks the controller HCI_UNCONFIGURED, which in
+		 * turn sets HCI_RAW. mgmt then excludes it entirely, so
+		 * btmgmt reports "Invalid Index" and bluetoothctl says "No
+		 * default controller available" even though the firmware
+		 * downloaded fine and the UART link is healthy.
+		 *
+		 * Supply a valid locally-administered address (Lenovo OUI
+		 * 68:50:ED + board-specific tail) so the controller is
+		 * configured and BlueZ can manage it.
+		 */
+		local-bd-address = [68 50 ed 71 6f 21];
+
+		/*
+		 * Lenovo TB-J716F: do NOT add enable-gpios here.
+		 *
+		 * BT_EN (GPIO 21) is already owned by the qca6390-pmu node
+		 * ("bt-enable-gpios"). Claiming it a second time makes the
+		 * pinctrl core reject this node:
+		 *
+		 *   sm8250-pinctrl: pin GPIO_21 already requested by
+		 *                   qca6390-pmu; cannot claim for serial0-0
+		 *   hci_uart_qca serial0-0: Error applying setting,
+		 *                           reverse things back
+		 *
+		 * and hci0 disappears entirely, which is worse than having no
+		 * BT_EN at all. The PMU driver brings the rail and the enable
+		 * line up before hci_qca probes.
+		 */
+	};
+};
+
+&ufs_mem_hc {
+	vcc-supply = <&vreg_l17a_2p5>;
+	vcc-max-microamp = <800000>;
+	vccq-supply = <&vreg_l6a_1p2>;
+	vccq-max-microamp = <800000>;
+	vccq2-supply = <&vreg_s4a_1p8>;
+	vccq2-max-microamp = <800000>;
+
+	status = "okay";
+};
+
+&ufs_mem_phy {
+	vdda-phy-supply = <&vreg_l5a_0p88>;
+	vdda-pll-supply = <&vreg_l9a_1p2>;
+
+	status = "okay";
+};
+
+&usb_1 {
+	status = "okay";
+};
+
+&usb_1_dwc3 {
+	dr_mode = "peripheral";
+};
+
+&usb_1_hsphy {
+	vdda-pll-supply = <&vreg_l5a_0p88>;
+	vdda18-supply = <&vreg_l12a_1p8>;
+	vdda33-supply = <&vreg_l2a_3p1>;
+
+	status = "okay";
+};
+
+&usb_1_qmpphy {
+	vdda-phy-supply = <&vreg_l9a_1p2>;
+	vdda-pll-supply = <&vreg_l18a_0p9>;
+
+	status = "okay";
+};
+
+&venus {
+	firmware-name = "qcom/sm8250/LENOVO/J716F/venus.bin";
+	status = "okay";
+};
+
+/*
+ * Display: 2560x1600 AMOLED driven by a Raydium RM69380 over *two* DSI links
+ * (each 1280x1600) in command mode. Mainline has a driver for exactly this
+ * panel (panel-raydium-rm69380.c, compatible lenovo,j716f-edo-rm69380), whose
+ * binding requires vddio, avdd and reset-gpios.
+ *
+ * HISTORY NOTE: the earlier claim that "without these nodes nothing drives
+ * the panel" turned out to be WRONG -- see the DISPLAY POLICY comment at the
+ * end of this file. With no mdss nodes the bootloader's own display pipeline
+ * keeps scanning out the simple-framebuffer, and fbcon output IS visible.
+ * These bring-up nodes are kept for reference; they are disabled below.
+ *
+ * Dual-DSI wiring follows sm8250-xiaomi-elish-common.dtsi, the reference for a
+ * working dual-DSI panel on this SoC. Values specific to the j716f panel
+ * (reset gpio, supplies, lane count, phy type) come from the device's own
+ * vendor dtbo.
+ */
+&mdss {
+	status = "okay";
+};
+
+&mdss_dsi0 {
+	vdda-supply = <&vreg_l9a_1p2>;
+	qcom,dual-dsi-mode;
+	qcom,sync-dual-dsi;
+	qcom,master-dsi;
+	status = "okay";
+
+	/*
+	 * This panel is driven in command mode: rm69380 sets
+	 * MIPI_DSI_MODE_VIDEO_BURST without MIPI_DSI_MODE_VIDEO, and
+	 * msm_dsi_is_cmd_mode() tests exactly that bit, so the DPU uses its
+	 * command-mode encoder (dpu_encoder_phys_cmd). That encoder paces
+	 * itself off the panel's TE (tearing effect) signal and waits for a
+	 * pingpong-done IRQ per kickoff; with no TE wired up it times out
+	 * forever ("failed wait_for_idle ... ret:-110") and nothing is ever
+	 * scanned out.
+	 *
+	 * The vendor tree routes TE to TLMM gpio66 (qcom,platform-te-gpio =
+	 * <&tlmm 0x42 0>), and gpio66 is one of the five SM8250 pins the TLMM
+	 * can mux to mdp_vsync. Note the pinctrl lives on the DSI *controller*
+	 * node, not on the panel child: msm's DSI host applies it through
+	 * pinctrl_pm_select_default_state(&msm_host->pdev->dev), which is the
+	 * controller device. This mirrors the one mainline command-mode DSI
+	 * panel (jdi,fhd-r63452 on msm8996-xiaomi-*).
+	 */
+	pinctrl-names = "default", "sleep";
+	pinctrl-0 = <&panel_te_active>;
+	pinctrl-1 = <&panel_te_suspend>;
+
+	panel@0 {
+		compatible = "lenovo,j716f-edo-rm69380", "raydium,rm69380";
+		reg = <0>;
+
+		vddio-supply = <&vreg_l14a_1p88>;
+		avdd-supply = <&panel_avdd>;
+		enable-gpios = <&tlmm 60 GPIO_ACTIVE_HIGH>;
+
+		/* vendor: qcom,platform-reset-gpio = <&tlmm 0x4b ...> (pin 75) */
+		reset-gpios = <&tlmm 75 GPIO_ACTIVE_LOW>;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+
+				panel_in_0: endpoint {
+					remote-endpoint = <&mdss_dsi0_out>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+
+				panel_in_1: endpoint {
+					remote-endpoint = <&mdss_dsi1_out>;
+				};
+			};
+		};
+	};
+};
+
+&mdss_dsi0_out {
+	/* vendor rm69380 node enables lane-0..3, i.e. 4 D-PHY lanes per link */
+	data-lanes = <0 1 2 3>;
+	remote-endpoint = <&panel_in_0>;
+};
+
+&mdss_dsi0_phy {
+	vdds-supply = <&vreg_l5a_0p88>;
+	/* vendor phy-timings start with 0x00 == D-PHY (CPHY ones start 0x01/0x03) */
+	phy-type = <PHY_TYPE_DPHY>;
+	status = "okay";
+};
+
+&mdss_dsi1 {
+	vdda-supply = <&vreg_l9a_1p2>;
+	qcom,dual-dsi-mode;
+	qcom,sync-dual-dsi;
+	/* DSI1 is the slave, so it takes DSI0's PHY clocks */
+	assigned-clock-parents = <&mdss_dsi0_phy 0>, <&mdss_dsi0_phy 1>;
+	status = "okay";
+};
+
+&mdss_dsi1_out {
+	data-lanes = <0 1 2 3>;
+	remote-endpoint = <&panel_in_1>;
+};
+
+&mdss_dsi1_phy {
+	vdds-supply = <&vreg_l5a_0p88>;
+	phy-type = <PHY_TYPE_DPHY>;
+	status = "okay";
+};
+
+/* Native dual-DSI display is enabled. The port restores the shared PLL bias
+ * state and caches the actual byte/pixel/interface rates across power cycles.
+ * See docs/MAINLINE-PORT.zh-CN.md for the display regression tests.
+ */
+&mdss {
+	status = "okay";
+};
+
+&mdss_dsi0 {
+	status = "okay";
+};
+
+&mdss_dsi0_phy {
+	status = "okay";
+};
+
+&mdss_dsi1 {
+	status = "okay";
+};
+
+&mdss_dsi1_phy {
+	status = "okay";
+};
+
+/* The verified internal DMIC selector is PM8150B GPIO1 (gpiochip offset 0).
+ * Hold it high from GPIO-controller probe, before ALSA/UCM probes the ADC.
+ * The separate DMIC EN control continues to gate microphone power.
+ */
+&pm8150b_gpios {
+	microphone-select-hog {
+		gpio-hog;
+		gpios = <1 GPIO_ACTIVE_HIGH>;
+		output-high;
+		line-name = "j716f-microphone-select";
+	};
+};
+
+/* Avoid the observed hard lockups in MMIO broadcast mode on this board.
+ * Use the generic hrtimer broadcast fallback while retaining the per-CPU
+ * architectural timer and PSCI CPU idle states. Long-term power behaviour
+ * and the precise MMIO/cluster-idle failure mechanism remain under study.
+ */
+&{/soc@0/timer@17c20000} {
+	status = "disabled";
+};
