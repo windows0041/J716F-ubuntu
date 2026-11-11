@@ -1,0 +1,3 @@
+#!/bin/sh
+# The user chose Chrome's local store instead of the system login keyring.
+exec /usr/bin/google-chrome-stable --password-store=basic "$@"

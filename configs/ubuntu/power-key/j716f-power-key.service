@@ -1,0 +1,20 @@
+[Unit]
+Description=J716F graphical power-button actions
+Wants=j716f-primary-pon.service
+After=display-manager.service j716f-primary-pon.service
+PartOf=graphical.target
+Conflicts=j716f-charge-only.service
+ConditionPathExists=/run/j716f-disk-desktop/active
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/j716f-power-key
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+
+[Install]
+WantedBy=graphical.target

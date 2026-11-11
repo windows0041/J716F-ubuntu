@@ -26,3 +26,33 @@
 按用户要求，当前安装的 Google APT 条目已改为 `.sources.disabled`，暂不参与更新；源码仓库不分发第三方浏览器包或个人浏览器设置。
 
 清理只移除了安装中的旧诊断服务、实验脚本、已备份的旧镜像和缓存；所需固件、匹配模块、fsck、指纹及音频组件继续保留。用户已确认清理后重启、桌面、键盘和触控板正常。
+
+## 屏幕键盘、手动休眠与电源键
+
+GNOME 自带屏幕键盘，无需额外安装键盘程序。`configs/ubuntu/dconf/30-j716f-tablet-controls` 启用屏幕键盘与立即锁屏；对应已安装用户也需要设置同名 GSettings 键。保持原来的自动整机休眠关闭策略，手动休眠单独验证。
+
+将 `tools/power/power-key.py` 安装为 `/usr/local/sbin/j716f-power-key`（0755），服务文件位于 `configs/ubuntu/power-key/j716f-power-key.service`，部署到 `/etc/systemd/system/`，然后重新加载并启用服务。依赖 Python 3、PyGObject/Gio、gdbus、runuser 与 systemd。服务只随 graphical.target 运行，与只充电界面的按键处理分开。
+
+| 当前状态与操作 | 行为 |
+| --- | --- |
+| 亮屏，按住至少 1 秒后松开（例如 1～2 秒） | 锁屏成功后请求系统 suspend |
+| 持续按住约 4.5 秒 | 请求正常关机，不调用强制断电 |
+| 黑屏或系统休眠，短按一下 | 唤醒显示，保留锁屏认证 |
+
+按住期间不会在第 1 秒先休眠，因此仍可继续按到关机阈值。程序只独占 PMIC 电源键，不独占磁吸键盘或触控板；使用内核单调时钟事件时间，并先处理已排队的松开事件，避免桌面调用延迟把短按误判成长按。
+
+当前内核提供 s2idle。已完成一次 RTC 自动唤醒和一次实体电源键休眠/唤醒，当轮成功计数为 2、失败计数为 0，用户确认唤醒进入锁屏。用户也已验证长按正常关机、重新开机进入桌面及屏幕键盘弹出。此结果不代表长时间睡眠、电池功耗或所有外设的恢复均已验收。只在最初验证时设置了 30 秒 RTC 回退闹钟，日常休眠不设置定时唤醒。
+
+时序测试入口为 `python3 tools/power/test-power-key.py`，不会访问电源键或执行关机。默认不记录按下/松开调试日志；临时环境变量 `J716F_POWER_KEY_TRACE=1` 仅供现场诊断。
+
+## 读取充电数据
+
+`tools/power/charge-power.py` 安装为 `/usr/local/bin/j716f-power`（0755）。普通用户运行 `j716f-power` 可读电量、电池电压/电流、相乘得到的电池侧净功率，以及 PMIC ADC5 的 USB 实测电压。`watch -n 1 j716f-power` 每秒刷新，按 Ctrl+C 退出。
+
+电池 sysfs 的 voltage_now 和 current_now 分别以微伏、微安提供，乘积除以 10¹² 得到瓦；正数为净充入，负数为放出。USB ADC 的 usbin_v_input 也是微伏。TCPM 的 current_now 来自角色协商电流限额，不能当作实际输入电流；当前无法据此计算充电器端总输入功率。
+
+## Chrome 启动时的密钥环密码
+
+当前用户明确选择仅让 Chrome 使用本地密码存储，接受其保存凭据不再由系统登录密钥环保护。`configs/ubuntu/desktop/j716f-chrome` 对应可执行的 `/usr/local/bin/j716f-chrome`；该用户的 Chrome desktop 文件中，主入口、新窗口和无痕窗口的 Exec 均改为调用此包装器，保留 Wayland 参数。
+
+这是可选的个人配置，不自动施加给其他用户；不修改账户密码，不清空登录密钥环。原 desktop 文件另行备份，设置过程未改写浏览器配置目录；实测 Chrome 主进程带有 `--password-store=basic`，同时登录密钥环仍锁定。重新开机后，用户再次从图标打开 Chrome，确认没有密钥环密码提示。
