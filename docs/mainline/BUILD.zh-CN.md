@@ -76,10 +76,16 @@ aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -Werror \
 
 配置参考位于 configs/ubuntu/charge-only；它们是源码材料，不会因编译自动安装到系统。
 
+## USB 模块与运行配置
+
+NB7VPQ904M 配置为模块，构建结果为 `drivers/usb/typec/mux/nb7vpq904m.ko`。日常 initramfs 在 USB 枚举前从 `/bin/nb7vpq904m.ko` 加载它；打包时必须包含与同一内核配置及符号版本匹配的模块，根文件系统也应部署完整匹配的模块目录。USB-C 角色及 redriver 拓扑已合并到板级 DTS，不要重复叠加早期 USB 测试覆盖层，也不要强制设置 `maximum-speed = "super-speed"`。
+
+充电电压 ADC 的独立覆盖层仍在 `configs/kernel/j716f-usbin-adc-overlay.dts`，组装完整启动镜像时需要保留。运行服务、国内 APT 源及日常启动配置见 [运行配置](RUNTIME.zh-CN.md)。
+
 ## 诊断镜像与实际安装的区别
 
 build-verified-diag.py 可接收另行取得、摘要匹配的 R3 boot，替换为 RAM-only init 并移除自动分区合并入口。它需要自己的固件和适配的启动组件，不能仅凭 Image、DTB 两个文件完成安装。
 
 build-mainline-diag.py 是早期布局诊断工具，输出默认标记为未实机验证；不要将其自动视为当前可用启动镜像。无认证 USB Telnet 只应用于受控的本地诊断。
 
-本发布分支不包含绑定某台设备 UUID、原 boot 摘要或个人账户的在线刷写脚本，也没有通用的 Ubuntu 26.10 一键安装器。生成 boot、部署模块与固件、根文件系统首次启动，以及恢复方案仍需独立整理与验收。
+当前 `main` 分支不包含绑定某台设备 UUID、原 boot 摘要或个人账户的在线刷写脚本，也没有通用的 Ubuntu 26.10 一键安装器。生成 boot、部署模块与固件、根文件系统首次启动，以及恢复方案仍需独立整理与验收。

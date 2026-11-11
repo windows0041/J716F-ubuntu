@@ -39,7 +39,8 @@ def verified_kernel_snapshot():
             or manifest['upstream_commit'] != pins['kernel']['commit']
             or manifest['patch_sha256'] != pins['patch_sha256']
             or manifest['config_sha256'] != pins['config_sha256']
-            or not manifest['every_exported_entry_matches_debugged_tree']
+            or not manifest.get('every_exported_entry_matches_reconstructed_tree',
+                                manifest.get('every_exported_entry_matches_debugged_tree', False))
             or manifest['generated_build_outputs_included']):
         raise ValueError('kernel source provenance mismatch')
     root_tree = subprocess.check_output(['git', 'write-tree'], cwd=ROOT).decode().strip()

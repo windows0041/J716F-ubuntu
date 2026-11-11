@@ -11,6 +11,7 @@
 #include <linux/regmap.h>
 #include <linux/bitfield.h>
 #include <linux/of_graph.h>
+#include <linux/property.h>
 #include <drm/bridge/aux-bridge.h>
 #include <linux/usb/typec_dp.h>
 #include <linux/usb/typec_mux.h>
@@ -65,6 +66,7 @@ struct nb7vpq904m {
 	struct regulator *vcc_supply;
 	struct regmap *regmap;
 	struct typec_switch_dev *sw;
+	struct typec_mux_dev *mux;
 	struct typec_retimer *retimer;
 
 	bool swap_data_lanes;
@@ -273,35 +275,42 @@ static int nb7vpq904m_sw_set(struct typec_switch_dev *sw, enum typec_orientation
 	return ret;
 }
 
-static int nb7vpq904m_retimer_set(struct typec_retimer *retimer, struct typec_retimer_state *state)
+static int nb7vpq904m_set_mode(struct nb7vpq904m *nb7,
+			       struct typec_mux_state *state)
 {
-	struct nb7vpq904m *nb7 = typec_retimer_get_drvdata(retimer);
-	struct typec_mux_state mux_state;
+	unsigned int svid = state->alt ? state->alt->svid : 0;
 	int ret = 0;
 
 	mutex_lock(&nb7->lock);
-
-	if (nb7->mode != state->mode) {
+	if (nb7->mode != state->mode || nb7->svid != svid) {
 		nb7->mode = state->mode;
-
-		if (state->alt)
-			nb7->svid = state->alt->svid;
-		else
-			nb7->svid = 0; // No SVID
-
+		nb7->svid = svid;
 		ret = nb7vpq904m_set(nb7);
 	}
-
 	mutex_unlock(&nb7->lock);
 
 	if (ret)
 		return ret;
 
-	mux_state.alt = state->alt;
-	mux_state.data = state->data;
-	mux_state.mode = state->mode;
+	return typec_mux_set(nb7->typec_mux, state);
+}
 
-	return typec_mux_set(nb7->typec_mux, &mux_state);
+static int nb7vpq904m_mux_set(struct typec_mux_dev *mux,
+			      struct typec_mux_state *state)
+{
+	return nb7vpq904m_set_mode(typec_mux_get_drvdata(mux), state);
+}
+
+static int nb7vpq904m_retimer_set(struct typec_retimer *retimer,
+				  struct typec_retimer_state *state)
+{
+	struct typec_mux_state mux_state = {
+		.alt = state->alt,
+		.data = state->data,
+		.mode = state->mode,
+	};
+
+	return nb7vpq904m_set_mode(typec_retimer_get_drvdata(retimer), &mux_state);
 }
 
 static const struct regmap_config nb7_regmap = {
@@ -387,6 +396,7 @@ static int nb7vpq904m_probe(struct i2c_client *client)
 {
 	struct device *dev = &client->dev;
 	struct typec_switch_desc sw_desc = { };
+	struct typec_mux_desc mux_desc = { };
 	struct typec_retimer_desc retimer_desc = { };
 	struct nb7vpq904m *nb7;
 	int ret;
@@ -454,6 +464,19 @@ static int nb7vpq904m_probe(struct i2c_client *client)
 		goto err_disable_gpio;
 	}
 
+	if (device_property_read_bool(dev, "mode-switch")) {
+		mux_desc.drvdata = nb7;
+		mux_desc.fwnode = dev->fwnode;
+		mux_desc.set = nb7vpq904m_mux_set;
+
+		nb7->mux = typec_mux_register(dev, &mux_desc);
+		if (IS_ERR(nb7->mux)) {
+			ret = dev_err_probe(dev, PTR_ERR(nb7->mux),
+					    "Error registering typec mux\n");
+			goto err_switch_unregister;
+		}
+	}
+
 	retimer_desc.drvdata = nb7;
 	retimer_desc.fwnode = dev->fwnode;
 	retimer_desc.set = nb7vpq904m_retimer_set;
@@ -462,11 +485,14 @@ static int nb7vpq904m_probe(struct i2c_client *client)
 	if (IS_ERR(nb7->retimer)) {
 		ret = dev_err_probe(dev, PTR_ERR(nb7->retimer),
 				    "Error registering typec retimer\n");
-		goto err_switch_unregister;
+		goto err_mux_unregister;
 	}
 
+	i2c_set_clientdata(client, nb7);
 	return 0;
 
+err_mux_unregister:
+	typec_mux_unregister(nb7->mux);
 err_switch_unregister:
 	typec_switch_unregister(nb7->sw);
 
@@ -488,6 +514,7 @@ static void nb7vpq904m_remove(struct i2c_client *client)
 	struct nb7vpq904m *nb7 = i2c_get_clientdata(client);
 
 	typec_retimer_unregister(nb7->retimer);
+	typec_mux_unregister(nb7->mux);
 	typec_switch_unregister(nb7->sw);
 
 	gpiod_set_value(nb7->enable_gpio, 0);

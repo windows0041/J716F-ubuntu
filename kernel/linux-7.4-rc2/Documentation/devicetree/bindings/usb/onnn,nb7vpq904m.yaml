@@ -23,6 +23,7 @@ properties:
   enable-gpios: true
   orientation-switch: true
   retimer-switch: true
+  mode-switch: true
 
   ports:
     $ref: /schemas/graph.yaml#/properties/ports

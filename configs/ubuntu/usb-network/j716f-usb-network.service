@@ -1,0 +1,14 @@
+[Unit]
+Description=J716F USB Ethernet network
+ConditionPathExists=/run/j716f-disk-desktop/active
+After=systemd-udev-trigger.service local-fs.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/j716f-usb-network
+Restart=on-failure
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

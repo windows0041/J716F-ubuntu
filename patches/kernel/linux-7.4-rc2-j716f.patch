@@ -1,4 +1,3 @@
-diff --git a/Documentation/devicetree/bindings/input/goodix-fingerprint.yaml b/Documentation/devicetree/bindings/input/goodix-fingerprint.yaml
 --- /dev/null
 +++ b/Documentation/devicetree/bindings/input/goodix-fingerprint.yaml
 @@ -0,0 +1,76 @@
@@ -78,7 +77,16 @@ diff --git a/Documentation/devicetree/bindings/input/goodix-fingerprint.yaml b/D
 +        pinctrl-names = "default";
 +        pinctrl-0 = <&fp_int_default>;
 +    };
-diff --git a/arch/arm64/boot/dts/qcom/Makefile b/arch/arm64/boot/dts/qcom/Makefile
+--- a/Documentation/devicetree/bindings/usb/onnn,nb7vpq904m.yaml
++++ b/Documentation/devicetree/bindings/usb/onnn,nb7vpq904m.yaml
+@@ -23,6 +23,7 @@
+   enable-gpios: true
+   orientation-switch: true
+   retimer-switch: true
++  mode-switch: true
+ 
+   ports:
+     $ref: /schemas/graph.yaml#/properties/ports
 --- a/arch/arm64/boot/dts/qcom/Makefile
 +++ b/arch/arm64/boot/dts/qcom/Makefile
 @@ -1,4 +1,11 @@
@@ -101,10 +109,9 @@ diff --git a/arch/arm64/boot/dts/qcom/Makefile b/arch/arm64/boot/dts/qcom/Makefi
  dtb-$(CONFIG_ARCH_QCOM)	+= sm8250-mtp.dtb
  dtb-$(CONFIG_ARCH_QCOM)	+= sm8250-samsung-r8q.dtb
  dtb-$(CONFIG_ARCH_QCOM)	+= sm8250-samsung-x1q.dtb
-diff --git a/arch/arm64/boot/dts/qcom/sm8250-lenovo-j716f.dts b/arch/arm64/boot/dts/qcom/sm8250-lenovo-j716f.dts
 --- /dev/null
 +++ b/arch/arm64/boot/dts/qcom/sm8250-lenovo-j716f.dts
-@@ -0,0 +1,2453 @@
+@@ -0,0 +1,2535 @@
 +// SPDX-License-Identifier: GPL-2.0-only
 +/*
 + * Copyright (c) 2025, David Wronek <david@mainlining.org>
@@ -836,7 +843,35 @@ diff --git a/arch/arm64/boot/dts/qcom/sm8250-lenovo-j716f.dts b/arch/arm64/boot/
 +	clock-frequency = <400000>;
 +	status = "okay";
 +
-+	/* onsemi NB7VPQ904M USB redriver @ 19 */
++	typec-mux@19 {
++		compatible = "onnn,nb7vpq904m";
++		reg = <0x19>;
++		/* Board supply referenced by the ZUI redriver node. */
++		vcc-supply = <&vreg_l16a_3p3>;
++		orientation-switch;
++		retimer-switch;
++		mode-switch;
++
++		ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			port@0 {
++				reg = <0>;
++				j716f_redriver_connector: endpoint {
++					remote-endpoint = <&j716f_typec_ss>;
++				};
++			};
++
++			port@1 {
++				reg = <1>;
++				j716f_redriver_phy: endpoint {
++					remote-endpoint = <&usb_1_qmpphy_out>;
++					data-lanes = <0 1 2 3>;
++				};
++			};
++		};
++	};
 +
 +	/* Four CS35L41 speaker amplifiers (vendor DT fragment@55):
 +	 * all share reset gpio 131; IRQs are 67, 113, 126, 68.
@@ -2373,7 +2408,9 @@ diff --git a/arch/arm64/boot/dts/qcom/sm8250-lenovo-j716f.dts b/arch/arm64/boot/
 +};
 +
 +&usb_1_dwc3 {
-+	dr_mode = "peripheral";
++	dr_mode = "otg";
++	usb-role-switch;
++	role-switch-default-mode = "peripheral";
 +};
 +
 +&usb_1_hsphy {
@@ -2558,7 +2595,148 @@ diff --git a/arch/arm64/boot/dts/qcom/sm8250-lenovo-j716f.dts b/arch/arm64/boot/
 +&{/soc@0/timer@17c20000} {
 +	status = "disabled";
 +};
-diff --git a/drivers/clk/qcom/dispcc-sm8250.c b/drivers/clk/qcom/dispcc-sm8250.c
++
++&pm8150b_vbus {
++	regulator-name = "usb-c-vbus";
++	regulator-min-microamp = <500000>;
++	regulator-max-microamp = <500000>;
++	status = "okay";
++};
++
++&pm8150b_typec {
++	vdd-pdphy-supply = <&vreg_l2a_3p1>;
++	status = "okay";
++
++	connector {
++		compatible = "usb-c-connector";
++		label = "USB-C";
++		power-role = "dual";
++		data-role = "dual";
++		try-power-role = "sink";
++		self-powered;
++		vbus-supply = <&pm8150b_vbus>;
++		/* Validate data-role switching without PD resets during enumeration. */
++		pd-disable;
++		typec-power-opmode = "default";
++
++		ports {
++			#address-cells = <1>;
++			#size-cells = <0>;
++
++			port@0 {
++				reg = <0>;
++				j716f_typec_hs: endpoint {
++					remote-endpoint = <&usb_1_dwc3_hs_out>;
++				};
++			};
++
++			port@1 {
++				reg = <1>;
++				j716f_typec_ss: endpoint {
++					remote-endpoint = <&j716f_redriver_connector>;
++				};
++			};
++		};
++	};
++};
++
++&usb_1_dwc3_hs_out {
++	remote-endpoint = <&j716f_typec_hs>;
++};
++
++&usb_1_qmpphy_out {
++	remote-endpoint = <&j716f_redriver_phy>;
++};
+--- a/arch/arm64/boot/dts/qcom/sm8250.dtsi
++++ b/arch/arm64/boot/dts/qcom/sm8250.dtsi
+@@ -13,6 +13,7 @@
+ #include <dt-bindings/firmware/qcom,scm.h>
+ #include <dt-bindings/gpio/gpio.h>
+ #include <dt-bindings/interconnect/qcom,osm-l3.h>
++#include <dt-bindings/interconnect/qcom,icc.h>
+ #include <dt-bindings/interconnect/qcom,sm8250.h>
+ #include <dt-bindings/mailbox/qcom-ipcc.h>
+ #include <dt-bindings/phy/phy-qcom-qmp.h>
+@@ -107,7 +108,8 @@
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 0>;
+ 			operating-points-v2 = <&cpu0_opp_table>;
+-			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
++			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
++					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
+ 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
+ 			#cooling-cells = <2>;
+ 			l2_0: l2-cache {
+@@ -138,7 +140,8 @@
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 0>;
+ 			operating-points-v2 = <&cpu0_opp_table>;
+-			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
++			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
++					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
+ 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
+ 			#cooling-cells = <2>;
+ 			l2_100: l2-cache {
+@@ -163,7 +166,8 @@
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 0>;
+ 			operating-points-v2 = <&cpu0_opp_table>;
+-			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
++			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
++					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
+ 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
+ 			#cooling-cells = <2>;
+ 			l2_200: l2-cache {
+@@ -188,7 +192,8 @@
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 0>;
+ 			operating-points-v2 = <&cpu0_opp_table>;
+-			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
++			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
++					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
+ 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
+ 			#cooling-cells = <2>;
+ 			l2_300: l2-cache {
+@@ -213,7 +218,8 @@
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 1>;
+ 			operating-points-v2 = <&cpu4_opp_table>;
+-			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
++			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
++					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
+ 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
+ 			#cooling-cells = <2>;
+ 			l2_400: l2-cache {
+@@ -238,7 +244,8 @@
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 1>;
+ 			operating-points-v2 = <&cpu4_opp_table>;
+-			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
++			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
++					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
+ 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
+ 			#cooling-cells = <2>;
+ 			l2_500: l2-cache {
+@@ -263,7 +270,8 @@
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 1>;
+ 			operating-points-v2 = <&cpu4_opp_table>;
+-			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
++			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
++					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
+ 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
+ 			#cooling-cells = <2>;
+ 			l2_600: l2-cache {
+@@ -288,7 +296,8 @@
+ 			power-domain-names = "psci";
+ 			qcom,freq-domain = <&cpufreq_hw 2>;
+ 			operating-points-v2 = <&cpu7_opp_table>;
+-			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
++			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
++					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
+ 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
+ 			#cooling-cells = <2>;
+ 			l2_700: l2-cache {
 --- a/drivers/clk/qcom/dispcc-sm8250.c
 +++ b/drivers/clk/qcom/dispcc-sm8250.c
 @@ -5,6 +5,7 @@
@@ -2610,7 +2788,6 @@ diff --git a/drivers/clk/qcom/dispcc-sm8250.c b/drivers/clk/qcom/dispcc-sm8250.c
  	ret = devm_pm_runtime_enable(&pdev->dev);
  	if (ret)
  		return ret;
-diff --git a/drivers/firmware/qcom/qcom_scm-smc.c b/drivers/firmware/qcom/qcom_scm-smc.c
 --- a/drivers/firmware/qcom/qcom_scm-smc.c
 +++ b/drivers/firmware/qcom/qcom_scm-smc.c
 @@ -220,6 +220,12 @@
@@ -2626,7 +2803,6 @@ diff --git a/drivers/firmware/qcom/qcom_scm-smc.c b/drivers/firmware/qcom/qcom_s
  	return (long)smc_res.a0 ? qcom_scm_remap_error(smc_res.a0) : 0;
  
  }
-diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
 --- a/drivers/firmware/qcom/qcom_scm.c
 +++ b/drivers/firmware/qcom/qcom_scm.c
 @@ -1,6 +1,7 @@
@@ -3277,7 +3453,57 @@ diff --git a/drivers/firmware/qcom/qcom_scm.c b/drivers/firmware/qcom/qcom_scm.c
  
  	if (!of_machine_device_match(qcom_scm_qseecom_allowlist)) {
  		dev_info(scm->dev, "qseecom: untested machine, skipping\n");
-diff --git a/drivers/gpu/drm/msm/dsi/dsi_host.c b/drivers/gpu/drm/msm/dsi/dsi_host.c
+--- a/drivers/gpio/gpiolib-of.c
++++ b/drivers/gpio/gpiolib-of.c
+@@ -741,7 +741,8 @@
+ 
+ 	*lflags = of_convert_gpio_flags(xlate_flags);
+ 
+-	return 0;
++	/* Preserve controller-specific numbering (e.g. one-based PMIC GPIOs). */
++	return gpiod_hwgpio(desc);
+ }
+ 
+ #ifdef CONFIG_OF_DYNAMIC
+--- a/drivers/gpio/gpiolib.c
++++ b/drivers/gpio/gpiolib.c
+@@ -964,7 +964,7 @@
+ 	enum gpiod_flags dflags;
+ 	const char *name = NULL;
+ 	struct gpio_desc *desc;
+-	unsigned int num_hogs;
++	unsigned int num_hogs, offset;
+ 	unsigned long lflags;
+ 	int ret, argc;
+ 	/*
+@@ -1027,8 +1027,9 @@
+ 				gpiospec.args[j] = gpios[i * cells + j];
+ 
+ 			ret = of_gpiochip_get_lflags(gc, &gpiospec, &lflags);
+-			if (ret)
++			if (ret < 0)
+ 				return ret;
++			offset = ret;
+ 
+ 			/*
+ 			 * If no line-name property is present, fall back to the OF
+@@ -1037,6 +1038,7 @@
+ 			if (!name)
+ 				name = to_of_node(fwnode)->name;
+ 		} else {
++			offset = gpios[i * cells];
+ 			/*
+ 			 * GPIO_ACTIVE_LOW is currently the only lookup flag
+ 			 * supported for non-OF firmware nodes.
+@@ -1045,7 +1047,7 @@
+ 				lflags |= GPIO_ACTIVE_LOW;
+ 		}
+ 
+-		desc = gpiochip_get_desc(gc, gpios[i * cells]);
++		desc = gpiochip_get_desc(gc, offset);
+ 		if (IS_ERR(desc))
+ 			return PTR_ERR(desc);
+ 
 --- a/drivers/gpu/drm/msm/dsi/dsi_host.c
 +++ b/drivers/gpu/drm/msm/dsi/dsi_host.c
 @@ -5,6 +5,7 @@
@@ -3577,7 +3803,6 @@ diff --git a/drivers/gpu/drm/msm/dsi/dsi_host.c b/drivers/gpu/drm/msm/dsi/dsi_ho
  
  	dsi_timing_setup(msm_host, is_bonded_dsi);
  	dsi_sw_reset(msm_host);
-diff --git a/drivers/gpu/drm/msm/dsi/phy/dsi_phy.c b/drivers/gpu/drm/msm/dsi/phy/dsi_phy.c
 --- a/drivers/gpu/drm/msm/dsi/phy/dsi_phy.c
 +++ b/drivers/gpu/drm/msm/dsi/phy/dsi_phy.c
 @@ -773,8 +773,22 @@
@@ -3604,7 +3829,6 @@ diff --git a/drivers/gpu/drm/msm/dsi/phy/dsi_phy.c b/drivers/gpu/drm/msm/dsi/phy
  		ret = msm_dsi_phy_pll_restore_state(phy);
  		if (ret) {
  			DRM_DEV_ERROR(dev, "%s: failed to restore phy state, %d\n",
-diff --git a/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c b/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c
 --- a/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c
 +++ b/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c
 @@ -8,6 +8,7 @@
@@ -3713,7 +3937,6 @@ diff --git a/drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c b/drivers/gpu/drm/msm/dsi
  	/* Turn off all PHY blocks */
  	writel(0x00, base + REG_DSI_7nm_PHY_CMN_CTRL_0);
  	spin_unlock_irqrestore(&pll->pll_enable_lock, flags);
-diff --git a/drivers/gpu/drm/msm/msm_fbdev.c b/drivers/gpu/drm/msm/msm_fbdev.c
 --- a/drivers/gpu/drm/msm/msm_fbdev.c
 +++ b/drivers/gpu/drm/msm/msm_fbdev.c
 @@ -164,6 +164,9 @@
@@ -3726,7 +3949,6 @@ diff --git a/drivers/gpu/drm/msm/msm_fbdev.c b/drivers/gpu/drm/msm/msm_fbdev.c
  	fbi->screen_size = bo->size;
  	fbi->fix.smem_start = paddr;
  	fbi->fix.smem_len = bo->size;
-diff --git a/drivers/gpu/drm/panel/panel-raydium-rm69380.c b/drivers/gpu/drm/panel/panel-raydium-rm69380.c
 --- a/drivers/gpu/drm/panel/panel-raydium-rm69380.c
 +++ b/drivers/gpu/drm/panel/panel-raydium-rm69380.c
 @@ -20,11 +20,18 @@
@@ -4091,7 +4313,6 @@ diff --git a/drivers/gpu/drm/panel/panel-raydium-rm69380.c b/drivers/gpu/drm/pan
  		ctx->dsi[i]->mode_flags = MIPI_DSI_MODE_VIDEO_BURST |
  					  MIPI_DSI_CLOCK_NON_CONTINUOUS;
  
-diff --git a/drivers/hid/hid-ids.h b/drivers/hid/hid-ids.h
 --- a/drivers/hid/hid-ids.h
 +++ b/drivers/hid/hid-ids.h
 @@ -471,6 +471,12 @@
@@ -4115,7 +4336,6 @@ diff --git a/drivers/hid/hid-ids.h b/drivers/hid/hid-ids.h
  #define USB_DEVICE_ID_LENOVO_TPKBD	0x6009
  #define USB_DEVICE_ID_LENOVO_CUSBKBD	0x6047
  #define USB_DEVICE_ID_LENOVO_TPIIUSBKBD	0x60ee
-diff --git a/drivers/hid/hid-multitouch.c b/drivers/hid/hid-multitouch.c
 --- a/drivers/hid/hid-multitouch.c
 +++ b/drivers/hid/hid-multitouch.c
 @@ -1452,8 +1452,25 @@
@@ -4145,7 +4365,6 @@ diff --git a/drivers/hid/hid-multitouch.c b/drivers/hid/hid-multitouch.c
  	if (td->is_pressurepad)
  		__set_bit(INPUT_PROP_PRESSUREPAD, input->propbit);
  
-diff --git a/drivers/hid/i2c-hid/i2c-hid-core.c b/drivers/hid/i2c-hid/i2c-hid-core.c
 --- a/drivers/hid/i2c-hid/i2c-hid-core.c
 +++ b/drivers/hid/i2c-hid/i2c-hid-core.c
 @@ -155,6 +155,33 @@
@@ -4182,7 +4401,6 @@ diff --git a/drivers/hid/i2c-hid/i2c-hid-core.c b/drivers/hid/i2c-hid/i2c-hid-co
  	{ 0, 0 }
  };
  
-diff --git a/drivers/hid/i2c-hid/i2c-hid-of-goodix.c b/drivers/hid/i2c-hid/i2c-hid-of-goodix.c
 --- a/drivers/hid/i2c-hid/i2c-hid-of-goodix.c
 +++ b/drivers/hid/i2c-hid/i2c-hid-of-goodix.c
 @@ -27,6 +27,7 @@
@@ -4238,7 +4456,6 @@ diff --git a/drivers/hid/i2c-hid/i2c-hid-of-goodix.c b/drivers/hid/i2c-hid/i2c-h
  	{ }
  };
  MODULE_DEVICE_TABLE(of, goodix_i2c_hid_of_match);
-diff --git a/drivers/i2c/busses/i2c-qcom-geni.c b/drivers/i2c/busses/i2c-qcom-geni.c
 --- a/drivers/i2c/busses/i2c-qcom-geni.c
 +++ b/drivers/i2c/busses/i2c-qcom-geni.c
 @@ -1118,7 +1118,8 @@
@@ -4251,7 +4468,6 @@ diff --git a/drivers/i2c/busses/i2c-qcom-geni.c b/drivers/i2c/busses/i2c-qcom-ge
  		fifo_disable = false;
  		gi2c->no_dma = true;
  	} else {
-diff --git a/drivers/input/misc/Kconfig b/drivers/input/misc/Kconfig
 --- a/drivers/input/misc/Kconfig
 +++ b/drivers/input/misc/Kconfig
 @@ -1023,4 +1023,13 @@
@@ -4268,7 +4484,6 @@ diff --git a/drivers/input/misc/Kconfig b/drivers/input/misc/Kconfig
 +
 +
  endif
-diff --git a/drivers/input/misc/Makefile b/drivers/input/misc/Makefile
 --- a/drivers/input/misc/Makefile
 +++ b/drivers/input/misc/Makefile
 @@ -97,3 +97,5 @@
@@ -4277,7 +4492,6 @@ diff --git a/drivers/input/misc/Makefile b/drivers/input/misc/Makefile
  obj-$(CONFIG_INPUT_IDEAPAD_SLIDEBAR)	+= ideapad_slidebar.o
 +
 +obj-$(CONFIG_INPUT_GOODIX_FP_SPI) += goodix_fp_spi.o
-diff --git a/drivers/input/misc/goodix_fp_spi.c b/drivers/input/misc/goodix_fp_spi.c
 --- /dev/null
 +++ b/drivers/input/misc/goodix_fp_spi.c
 @@ -0,0 +1,703 @@
@@ -4984,7 +5198,6 @@ diff --git a/drivers/input/misc/goodix_fp_spi.c b/drivers/input/misc/goodix_fp_s
 +MODULE_AUTHOR("Jandy Gou <gouqingsong@goodix.com>");
 +MODULE_DESCRIPTION("Goodix SPI fingerprint sensor driver");
 +MODULE_LICENSE("GPL");
-diff --git a/drivers/input/touchscreen/goodix.c b/drivers/input/touchscreen/goodix.c
 --- a/drivers/input/touchscreen/goodix.c
 +++ b/drivers/input/touchscreen/goodix.c
 @@ -33,7 +33,6 @@
@@ -5439,7 +5652,6 @@ diff --git a/drivers/input/touchscreen/goodix.c b/drivers/input/touchscreen/good
  	{ }
  };
  MODULE_DEVICE_TABLE(of, goodix_of_match);
-diff --git a/drivers/input/touchscreen/goodix.h b/drivers/input/touchscreen/goodix.h
 --- a/drivers/input/touchscreen/goodix.h
 +++ b/drivers/input/touchscreen/goodix.h
 @@ -51,11 +51,15 @@
@@ -5481,7 +5693,6 @@ diff --git a/drivers/input/touchscreen/goodix.h b/drivers/input/touchscreen/good
  	u8 config[GOODIX_CONFIG_MAX_LENGTH];
  	unsigned short keymap[GOODIX_MAX_KEYS];
  	u8 main_clk[GOODIX_MAIN_CLK_LEN];
-diff --git a/drivers/input/touchscreen/goodix_berlin_core.c b/drivers/input/touchscreen/goodix_berlin_core.c
 --- a/drivers/input/touchscreen/goodix_berlin_core.c
 +++ b/drivers/input/touchscreen/goodix_berlin_core.c
 @@ -166,6 +166,7 @@
@@ -5614,7 +5825,6 @@ diff --git a/drivers/input/touchscreen/goodix_berlin_core.c b/drivers/input/touc
  	error = goodix_berlin_power_on(cd);
  	if (error) {
  		dev_err(dev, "failed power on");
-diff --git a/drivers/input/touchscreen/goodix_berlin_i2c.c b/drivers/input/touchscreen/goodix_berlin_i2c.c
 --- a/drivers/input/touchscreen/goodix_berlin_i2c.c
 +++ b/drivers/input/touchscreen/goodix_berlin_i2c.c
 @@ -8,15 +8,25 @@
@@ -5680,7 +5890,6 @@ diff --git a/drivers/input/touchscreen/goodix_berlin_i2c.c b/drivers/input/touch
  	{ }
  };
  MODULE_DEVICE_TABLE(of, goodix_berlin_i2c_of_match);
-diff --git a/drivers/power/supply/bq27xxx_battery_i2c.c b/drivers/power/supply/bq27xxx_battery_i2c.c
 --- a/drivers/power/supply/bq27xxx_battery_i2c.c
 +++ b/drivers/power/supply/bq27xxx_battery_i2c.c
 @@ -153,6 +153,7 @@
@@ -5699,7 +5908,6 @@ diff --git a/drivers/power/supply/bq27xxx_battery_i2c.c b/drivers/power/supply/b
  
  	/* Get new ID for the new battery device */
  	num = ida_alloc(&battery_id, GFP_KERNEL);
-diff --git a/drivers/regulator/qcom-rpmh-regulator.c b/drivers/regulator/qcom-rpmh-regulator.c
 --- a/drivers/regulator/qcom-rpmh-regulator.c
 +++ b/drivers/regulator/qcom-rpmh-regulator.c
 @@ -1283,6 +1283,37 @@
@@ -5751,7 +5959,6 @@ diff --git a/drivers/regulator/qcom-rpmh-regulator.c b/drivers/regulator/qcom-rp
  		.compatible = "qcom,pm8150l-rpmh-regulators",
  		.data = pm8150l_vreg_data,
  	},
-diff --git a/drivers/soc/qcom/mdt_loader.c b/drivers/soc/qcom/mdt_loader.c
 --- a/drivers/soc/qcom/mdt_loader.c
 +++ b/drivers/soc/qcom/mdt_loader.c
 @@ -5,6 +5,7 @@
@@ -5921,7 +6128,6 @@ diff --git a/drivers/soc/qcom/mdt_loader.c b/drivers/soc/qcom/mdt_loader.c
  
  /**
   * qcom_mdt_read_metadata() - read header and metadata from mdt or mbn
-diff --git a/drivers/soc/qcom/rpmh-internal.h b/drivers/soc/qcom/rpmh-internal.h
 --- a/drivers/soc/qcom/rpmh-internal.h
 +++ b/drivers/soc/qcom/rpmh-internal.h
 @@ -8,6 +8,8 @@
@@ -5953,7 +6159,6 @@ diff --git a/drivers/soc/qcom/rpmh-internal.h b/drivers/soc/qcom/rpmh-internal.h
  };
  
  /**
-diff --git a/drivers/soc/qcom/rpmh.c b/drivers/soc/qcom/rpmh.c
 --- a/drivers/soc/qcom/rpmh.c
 +++ b/drivers/soc/qcom/rpmh.c
 @@ -24,7 +24,7 @@
@@ -6370,7 +6575,6 @@ diff --git a/drivers/soc/qcom/rpmh.c b/drivers/soc/qcom/rpmh.c
  
  	/* Wake sets are always complete and sleep sets are not */
  	rpm_msg.msg.wait_for_compl = (state == RPMH_WAKE_ONLY_STATE);
-diff --git a/drivers/soc/qcom/ubwc_config.c b/drivers/soc/qcom/ubwc_config.c
 --- a/drivers/soc/qcom/ubwc_config.c
 +++ b/drivers/soc/qcom/ubwc_config.c
 @@ -171,6 +171,8 @@
@@ -6382,7 +6586,6 @@ diff --git a/drivers/soc/qcom/ubwc_config.c b/drivers/soc/qcom/ubwc_config.c
  	{ .compatible = "qcom,sm8350", .data = &ubwc_4_0_hbb16, },
  	{ .compatible = "qcom,sm8450", .data = &ubwc_4_0_hbb16, },
  	{ .compatible = "qcom,sm8550", .data = &ubwc_4_0_hbb16, },
-diff --git a/drivers/tee/Kconfig b/drivers/tee/Kconfig
 --- a/drivers/tee/Kconfig
 +++ b/drivers/tee/Kconfig
 @@ -22,4 +22,6 @@
@@ -6392,7 +6595,6 @@ diff --git a/drivers/tee/Kconfig b/drivers/tee/Kconfig
 +source "drivers/tee/qseecom/Kconfig"
 +
  endif
-diff --git a/drivers/tee/Makefile b/drivers/tee/Makefile
 --- a/drivers/tee/Makefile
 +++ b/drivers/tee/Makefile
 @@ -8,3 +8,5 @@
@@ -6401,7 +6603,6 @@ diff --git a/drivers/tee/Makefile b/drivers/tee/Makefile
  obj-$(CONFIG_QCOMTEE) += qcomtee/
 +
 +obj-$(CONFIG_TEE_QSEECOM) += qseecom/
-diff --git a/drivers/tee/qseecom/Kconfig b/drivers/tee/qseecom/Kconfig
 --- /dev/null
 +++ b/drivers/tee/qseecom/Kconfig
 @@ -0,0 +1,28 @@
@@ -6433,14 +6634,12 @@ diff --git a/drivers/tee/qseecom/Kconfig b/drivers/tee/qseecom/Kconfig
 +	  the client device may send arbitrary commands to any loaded trusted
 +	  application. Restrict access to the device nodes accordingly. See
 +	  Documentation/tee/qseecom.rst.
-diff --git a/drivers/tee/qseecom/Makefile b/drivers/tee/qseecom/Makefile
 --- /dev/null
 +++ b/drivers/tee/qseecom/Makefile
 @@ -0,0 +1,3 @@
 +# SPDX-License-Identifier: GPL-2.0
 +obj-$(CONFIG_TEE_QSEECOM) += qseecomtee.o
 +qseecomtee-objs += core.o
-diff --git a/drivers/tee/qseecom/core.c b/drivers/tee/qseecom/core.c
 --- /dev/null
 +++ b/drivers/tee/qseecom/core.c
 @@ -0,0 +1,1937 @@
@@ -8381,7 +8580,139 @@ diff --git a/drivers/tee/qseecom/core.c b/drivers/tee/qseecom/core.c
 +MODULE_AUTHOR("Dawid Wróbel <me@dawidwrobel.com>");
 +MODULE_DESCRIPTION("Qualcomm QSEECOM TEE driver");
 +MODULE_LICENSE("GPL");
-diff --git a/include/linux/firmware/qcom/qcom_scm.h b/include/linux/firmware/qcom/qcom_scm.h
+--- a/drivers/usb/typec/mux/nb7vpq904m.c
++++ b/drivers/usb/typec/mux/nb7vpq904m.c
+@@ -11,6 +11,7 @@
+ #include <linux/regmap.h>
+ #include <linux/bitfield.h>
+ #include <linux/of_graph.h>
++#include <linux/property.h>
+ #include <drm/bridge/aux-bridge.h>
+ #include <linux/usb/typec_dp.h>
+ #include <linux/usb/typec_mux.h>
+@@ -65,6 +66,7 @@
+ 	struct regulator *vcc_supply;
+ 	struct regmap *regmap;
+ 	struct typec_switch_dev *sw;
++	struct typec_mux_dev *mux;
+ 	struct typec_retimer *retimer;
+ 
+ 	bool swap_data_lanes;
+@@ -273,35 +275,42 @@
+ 	return ret;
+ }
+ 
+-static int nb7vpq904m_retimer_set(struct typec_retimer *retimer, struct typec_retimer_state *state)
+-{
+-	struct nb7vpq904m *nb7 = typec_retimer_get_drvdata(retimer);
+-	struct typec_mux_state mux_state;
++static int nb7vpq904m_set_mode(struct nb7vpq904m *nb7,
++			       struct typec_mux_state *state)
++{
++	unsigned int svid = state->alt ? state->alt->svid : 0;
+ 	int ret = 0;
+ 
+ 	mutex_lock(&nb7->lock);
+-
+-	if (nb7->mode != state->mode) {
++	if (nb7->mode != state->mode || nb7->svid != svid) {
+ 		nb7->mode = state->mode;
+-
+-		if (state->alt)
+-			nb7->svid = state->alt->svid;
+-		else
+-			nb7->svid = 0; // No SVID
+-
++		nb7->svid = svid;
+ 		ret = nb7vpq904m_set(nb7);
+ 	}
+-
+ 	mutex_unlock(&nb7->lock);
+ 
+ 	if (ret)
+ 		return ret;
+ 
+-	mux_state.alt = state->alt;
+-	mux_state.data = state->data;
+-	mux_state.mode = state->mode;
+-
+-	return typec_mux_set(nb7->typec_mux, &mux_state);
++	return typec_mux_set(nb7->typec_mux, state);
++}
++
++static int nb7vpq904m_mux_set(struct typec_mux_dev *mux,
++			      struct typec_mux_state *state)
++{
++	return nb7vpq904m_set_mode(typec_mux_get_drvdata(mux), state);
++}
++
++static int nb7vpq904m_retimer_set(struct typec_retimer *retimer,
++				  struct typec_retimer_state *state)
++{
++	struct typec_mux_state mux_state = {
++		.alt = state->alt,
++		.data = state->data,
++		.mode = state->mode,
++	};
++
++	return nb7vpq904m_set_mode(typec_retimer_get_drvdata(retimer), &mux_state);
+ }
+ 
+ static const struct regmap_config nb7_regmap = {
+@@ -387,6 +396,7 @@
+ {
+ 	struct device *dev = &client->dev;
+ 	struct typec_switch_desc sw_desc = { };
++	struct typec_mux_desc mux_desc = { };
+ 	struct typec_retimer_desc retimer_desc = { };
+ 	struct nb7vpq904m *nb7;
+ 	int ret;
+@@ -454,6 +464,19 @@
+ 		goto err_disable_gpio;
+ 	}
+ 
++	if (device_property_read_bool(dev, "mode-switch")) {
++		mux_desc.drvdata = nb7;
++		mux_desc.fwnode = dev->fwnode;
++		mux_desc.set = nb7vpq904m_mux_set;
++
++		nb7->mux = typec_mux_register(dev, &mux_desc);
++		if (IS_ERR(nb7->mux)) {
++			ret = dev_err_probe(dev, PTR_ERR(nb7->mux),
++					    "Error registering typec mux\n");
++			goto err_switch_unregister;
++		}
++	}
++
+ 	retimer_desc.drvdata = nb7;
+ 	retimer_desc.fwnode = dev->fwnode;
+ 	retimer_desc.set = nb7vpq904m_retimer_set;
+@@ -462,11 +485,14 @@
+ 	if (IS_ERR(nb7->retimer)) {
+ 		ret = dev_err_probe(dev, PTR_ERR(nb7->retimer),
+ 				    "Error registering typec retimer\n");
+-		goto err_switch_unregister;
+-	}
+-
++		goto err_mux_unregister;
++	}
++
++	i2c_set_clientdata(client, nb7);
+ 	return 0;
+ 
++err_mux_unregister:
++	typec_mux_unregister(nb7->mux);
+ err_switch_unregister:
+ 	typec_switch_unregister(nb7->sw);
+ 
+@@ -488,6 +514,7 @@
+ 	struct nb7vpq904m *nb7 = i2c_get_clientdata(client);
+ 
+ 	typec_retimer_unregister(nb7->retimer);
++	typec_mux_unregister(nb7->mux);
+ 	typec_switch_unregister(nb7->sw);
+ 
+ 	gpiod_set_value(nb7->enable_gpio, 0);
 --- a/include/linux/firmware/qcom/qcom_scm.h
 +++ b/include/linux/firmware/qcom/qcom_scm.h
 @@ -6,6 +6,7 @@
@@ -8502,7 +8833,6 @@ diff --git a/include/linux/firmware/qcom/qcom_scm.h b/include/linux/firmware/qco
  {
  	return -EINVAL;
  }
-diff --git a/include/linux/soc/qcom/mdt_loader.h b/include/linux/soc/qcom/mdt_loader.h
 --- a/include/linux/soc/qcom/mdt_loader.h
 +++ b/include/linux/soc/qcom/mdt_loader.h
 @@ -15,6 +15,9 @@
@@ -8533,7 +8863,6 @@ diff --git a/include/linux/soc/qcom/mdt_loader.h b/include/linux/soc/qcom/mdt_lo
  
  static inline ssize_t qcom_mdt_get_size(const struct firmware *fw)
  {
-diff --git a/include/sound/cs35l41.h b/include/sound/cs35l41.h
 --- a/include/sound/cs35l41.h
 +++ b/include/sound/cs35l41.h
 @@ -38,6 +38,9 @@
@@ -8562,7 +8891,6 @@ diff --git a/include/sound/cs35l41.h b/include/sound/cs35l41.h
  	int dout_hiz;
  	struct cs35l41_gpio_cfg gpio1;
  	struct cs35l41_gpio_cfg gpio2;
-diff --git a/include/uapi/linux/tee.h b/include/uapi/linux/tee.h
 --- a/include/uapi/linux/tee.h
 +++ b/include/uapi/linux/tee.h
 @@ -60,6 +60,7 @@
@@ -8573,7 +8901,6 @@ diff --git a/include/uapi/linux/tee.h b/include/uapi/linux/tee.h
  
  /*
   * OP-TEE specific capabilities
-diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
 --- a/sound/soc/codecs/Kconfig
 +++ b/sound/soc/codecs/Kconfig
 @@ -1277,6 +1277,10 @@
@@ -8587,7 +8914,6 @@ diff --git a/sound/soc/codecs/Kconfig b/sound/soc/codecs/Kconfig
  config SND_SOC_ES83XX_DSM_COMMON
  	depends on ACPI
  	tristate
-diff --git a/sound/soc/codecs/Makefile b/sound/soc/codecs/Makefile
 --- a/sound/soc/codecs/Makefile
 +++ b/sound/soc/codecs/Makefile
 @@ -130,6 +130,7 @@
@@ -8606,7 +8932,6 @@ diff --git a/sound/soc/codecs/Makefile b/sound/soc/codecs/Makefile
  obj-$(CONFIG_SND_SOC_ES83XX_DSM_COMMON)    += snd-soc-es83xx-dsm-common.o
  obj-$(CONFIG_SND_SOC_ES8311)    += snd-soc-es8311.o
  obj-$(CONFIG_SND_SOC_ES8316)    += snd-soc-es8316.o
-diff --git a/sound/soc/codecs/cs35l41-lib.c b/sound/soc/codecs/cs35l41-lib.c
 --- a/sound/soc/codecs/cs35l41-lib.c
 +++ b/sound/soc/codecs/cs35l41-lib.c
 @@ -1278,6 +1278,23 @@
@@ -8657,7 +8982,6 @@ diff --git a/sound/soc/codecs/cs35l41-lib.c b/sound/soc/codecs/cs35l41-lib.c
  
  		/* Clear PUP/PDN status */
  		regmap_write(regmap, CS35L41_IRQ1_STATUS1, pup_pdn_mask);
-diff --git a/sound/soc/codecs/cs35l41.c b/sound/soc/codecs/cs35l41.c
 --- a/sound/soc/codecs/cs35l41.c
 +++ b/sound/soc/codecs/cs35l41.c
 @@ -909,6 +909,27 @@
@@ -8701,7 +9025,6 @@ diff --git a/sound/soc/codecs/cs35l41.c b/sound/soc/codecs/cs35l41.c
  
  	ret = device_property_read_u32(dev, "cirrus,asp-sdout-hiz", &val);
  	if (ret >= 0)
-diff --git a/sound/soc/codecs/es7210.c b/sound/soc/codecs/es7210.c
 --- /dev/null
 +++ b/sound/soc/codecs/es7210.c
 @@ -0,0 +1,705 @@
@@ -9410,7 +9733,6 @@ diff --git a/sound/soc/codecs/es7210.c b/sound/soc/codecs/es7210.c
 +
 +MODULE_DESCRIPTION("Everest Semi ES7210 ADC driver");
 +MODULE_LICENSE("GPL");
-diff --git a/sound/soc/qcom/common.c b/sound/soc/qcom/common.c
 --- a/sound/soc/qcom/common.c
 +++ b/sound/soc/qcom/common.c
 @@ -297,9 +297,22 @@
@@ -9439,7 +9761,6 @@ diff --git a/sound/soc/qcom/common.c b/sound/soc/qcom/common.c
  			}
  		} else {
  			/* DPCM frontend */
-diff --git a/sound/soc/qcom/qdsp6/q6afe-dai.c b/sound/soc/qcom/qdsp6/q6afe-dai.c
 --- a/sound/soc/qcom/qdsp6/q6afe-dai.c
 +++ b/sound/soc/qcom/qdsp6/q6afe-dai.c
 @@ -980,51 +980,51 @@
@@ -9527,7 +9848,6 @@ diff --git a/sound/soc/qcom/qdsp6/q6afe-dai.c b/sound/soc/qcom/qdsp6/q6afe-dai.c
  		0, SND_SOC_NOPM, 0, 0),
  
  	SND_SOC_DAPM_AIF_IN("USB_RX", NULL, 0, SND_SOC_NOPM, 0, 0),
-diff --git a/sound/soc/qcom/qdsp6/q6afe.c b/sound/soc/qcom/qdsp6/q6afe.c
 --- a/sound/soc/qcom/qdsp6/q6afe.c
 +++ b/sound/soc/qcom/qdsp6/q6afe.c
 @@ -1028,6 +1028,7 @@
@@ -9678,7 +9998,206 @@ diff --git a/sound/soc/qcom/qdsp6/q6afe.c b/sound/soc/qcom/qdsp6/q6afe.c
  
  	return ret;
  }
-diff --git a/sound/soc/qcom/qdsp6/q6dsp-lpass-clocks.c b/sound/soc/qcom/qdsp6/q6dsp-lpass-clocks.c
+--- a/sound/soc/qcom/qdsp6/q6asm-dai.c
++++ b/sound/soc/qcom/qdsp6/q6asm-dai.c
+@@ -74,6 +74,10 @@
+ 	uint32_t initial_samples_drop;
+ 	uint32_t trailing_samples_drop;
+ 	bool notify_on_drain;
++	bool j716f_capture;
++	bool capture_enabled;
++	bool capture_waiting_run;
++	unsigned int capture_inflight;
+ };
+ 
+ struct q6asm_dai_data {
+@@ -176,14 +180,51 @@
+ 	.descriptor[0].formats = 0,
+ };
+ 
++/* J716F's ADSP accepts capture reads only after the RUN acknowledgement.
++ * Keep a full period queue, and stop replenishing it before pause/close.
++ * Do not hold the runtime lock while sending APR packets.
++ */
++static void j716f_capture_queue_reads(struct q6asm_dai_rtd *prtd)
++{
++	unsigned long flags;
++	int ret;
++
++	for (;;) {
++		spin_lock_irqsave(&prtd->lock, flags);
++		if (!prtd->capture_enabled || prtd->capture_waiting_run ||
++		    prtd->capture_inflight >= prtd->periods) {
++			spin_unlock_irqrestore(&prtd->lock, flags);
++			return;
++		}
++		prtd->capture_inflight++;
++		spin_unlock_irqrestore(&prtd->lock, flags);
++
++		ret = q6asm_read(prtd->audio_client, prtd->stream_id);
++		if (ret) {
++			spin_lock_irqsave(&prtd->lock, flags);
++			prtd->capture_inflight--;
++			spin_unlock_irqrestore(&prtd->lock, flags);
++			pr_warn_ratelimited("J716F: capture read queue failed: %d\n", ret);
++			return;
++		}
++	}
++}
++
+ static void event_handler(uint32_t opcode, uint32_t token,
+ 			  void *payload, void *priv)
+ {
+ 	struct q6asm_dai_rtd *prtd = priv;
+ 	struct snd_pcm_substream *substream = prtd->substream;
++	unsigned long flags;
+ 
+ 	switch (opcode) {
+ 	case ASM_CLIENT_EVENT_CMD_RUN_DONE:
++		if (prtd->j716f_capture) {
++			spin_lock_irqsave(&prtd->lock, flags);
++			prtd->capture_waiting_run = false;
++			spin_unlock_irqrestore(&prtd->lock, flags);
++			j716f_capture_queue_reads(prtd);
++		}
+ 		break;
+ 	case ASM_CLIENT_EVENT_CMD_EOS_DONE:
+ 		break;
+@@ -191,8 +232,16 @@
+ 		snd_pcm_period_elapsed(substream);
+ 		break;
+ 	case ASM_CLIENT_EVENT_DATA_READ_DONE:
++		if (prtd->j716f_capture) {
++			spin_lock_irqsave(&prtd->lock, flags);
++			if (prtd->capture_inflight)
++				prtd->capture_inflight--;
++			spin_unlock_irqrestore(&prtd->lock, flags);
++		}
+ 		snd_pcm_period_elapsed(substream);
+-		if (prtd->state == Q6ASM_STREAM_RUNNING)
++		if (prtd->j716f_capture)
++			j716f_capture_queue_reads(prtd);
++		else if (prtd->state == Q6ASM_STREAM_RUNNING)
+ 			q6asm_read(prtd->audio_client, prtd->stream_id);
+ 
+ 		break;
+@@ -209,6 +258,7 @@
+ 	struct q6asm_dai_rtd *prtd = runtime->private_data;
+ 	struct q6asm_dai_data *pdata;
+ 	struct device *dev = component->dev;
++	unsigned long flags;
+ 	int ret, i;
+ 
+ 	pdata = snd_soc_component_get_drvdata(component);
+@@ -219,6 +269,13 @@
+ 		dev_err(dev, "%s: private data null or audio client freed\n",
+ 			__func__);
+ 		return -EINVAL;
++	}
++
++	if (prtd->j716f_capture) {
++		spin_lock_irqsave(&prtd->lock, flags);
++		prtd->capture_enabled = false;
++		prtd->capture_waiting_run = true;
++		spin_unlock_irqrestore(&prtd->lock, flags);
+ 	}
+ 
+ 	prtd->pcm_count = snd_pcm_lib_period_bytes(substream);
+@@ -289,9 +346,15 @@
+ 							   runtime->channels,
+ 							   prtd->bits_per_sample);
+ 
+-		/* Queue the buffers */
+-		for (i = 0; i < runtime->periods; i++)
+-			q6asm_read(prtd->audio_client, prtd->stream_id);
++		if (prtd->j716f_capture) {
++			/* Previous session was closed before resetting this queue. */
++			spin_lock_irqsave(&prtd->lock, flags);
++			prtd->capture_inflight = 0;
++			spin_unlock_irqrestore(&prtd->lock, flags);
++		} else {
++			for (i = 0; i < runtime->periods; i++)
++				q6asm_read(prtd->audio_client, prtd->stream_id);
++		}
+ 
+ 	}
+ 	if (ret < 0)
+@@ -335,6 +398,7 @@
+ static int q6asm_dai_trigger(struct snd_soc_component *component,
+ 			     struct snd_pcm_substream *substream, int cmd)
+ {
++	unsigned long flags;
+ 	int ret = 0;
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+ 	struct q6asm_dai_rtd *prtd = runtime->private_data;
+@@ -343,21 +407,43 @@
+ 	case SNDRV_PCM_TRIGGER_START:
+ 	case SNDRV_PCM_TRIGGER_RESUME:
+ 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
++		if (prtd->j716f_capture) {
++			spin_lock_irqsave(&prtd->lock, flags);
++			prtd->capture_enabled = true;
++			prtd->capture_waiting_run = true;
++			spin_unlock_irqrestore(&prtd->lock, flags);
++		}
+ 		ret = q6asm_run_nowait(prtd->audio_client, prtd->stream_id,
+ 				       0, 0, 0);
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_STOP:
++		if (prtd->j716f_capture) {
++			spin_lock_irqsave(&prtd->lock, flags);
++			prtd->capture_enabled = false;
++			spin_unlock_irqrestore(&prtd->lock, flags);
++		}
+ 		ret = q6asm_cmd_nowait(prtd->audio_client, prtd->stream_id,
+ 				       CMD_EOS);
+ 		break;
+ 	case SNDRV_PCM_TRIGGER_SUSPEND:
+ 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
++		if (prtd->j716f_capture) {
++			spin_lock_irqsave(&prtd->lock, flags);
++			prtd->capture_enabled = false;
++			spin_unlock_irqrestore(&prtd->lock, flags);
++		}
+ 		ret = q6asm_cmd_nowait(prtd->audio_client, prtd->stream_id,
+ 				       CMD_PAUSE);
+ 		break;
+ 	default:
+ 		ret = -EINVAL;
+ 		break;
++	}
++
++	if (ret < 0 && prtd->j716f_capture) {
++		spin_lock_irqsave(&prtd->lock, flags);
++		prtd->capture_enabled = false;
++		spin_unlock_irqrestore(&prtd->lock, flags);
+ 	}
+ 
+ 	return ret;
+@@ -387,6 +473,9 @@
+ 	if (prtd == NULL)
+ 		return -ENOMEM;
+ 
++	spin_lock_init(&prtd->lock);
++	prtd->j716f_capture = substream->stream == SNDRV_PCM_STREAM_CAPTURE &&
++			      of_machine_is_compatible("lenovo,j716f");
+ 	prtd->substream = substream;
+ 	prtd->audio_client = q6asm_audio_client_alloc(dev,
+ 				(q6asm_cb)event_handler, prtd, stream_id,
+@@ -460,6 +549,13 @@
+ 	struct snd_pcm_runtime *runtime = substream->runtime;
+ 	struct snd_soc_pcm_runtime *soc_prtd = snd_soc_substream_to_rtd(substream);
+ 	struct q6asm_dai_rtd *prtd = runtime->private_data;
++	unsigned long flags;
++
++	if (prtd->j716f_capture) {
++		spin_lock_irqsave(&prtd->lock, flags);
++		prtd->capture_enabled = false;
++		spin_unlock_irqrestore(&prtd->lock, flags);
++	}
+ 
+ 	if (prtd->audio_client) {
+ 		if (prtd->state == Q6ASM_STREAM_RUNNING) {
 --- a/sound/soc/qcom/qdsp6/q6dsp-lpass-clocks.c
 +++ b/sound/soc/qcom/qdsp6/q6dsp-lpass-clocks.c
 @@ -87,9 +87,42 @@
@@ -9727,7 +10246,6 @@ diff --git a/sound/soc/qcom/qdsp6/q6dsp-lpass-clocks.c b/sound/soc/qcom/qdsp6/q6
  }
  
  static void clk_unvote_q6dsp_block(struct clk_hw *hw)
-diff --git a/sound/soc/qcom/qdsp6/q6routing.c b/sound/soc/qcom/qdsp6/q6routing.c
 --- a/sound/soc/qcom/qdsp6/q6routing.c
 +++ b/sound/soc/qcom/qdsp6/q6routing.c
 @@ -428,6 +428,7 @@
@@ -9753,7 +10271,6 @@ diff --git a/sound/soc/qcom/qdsp6/q6routing.c b/sound/soc/qcom/qdsp6/q6routing.c
  	}
  	mutex_unlock(&routing_data->lock);
  
-diff --git a/sound/soc/qcom/sm8250.c b/sound/soc/qcom/sm8250.c
 --- a/sound/soc/qcom/sm8250.c
 +++ b/sound/soc/qcom/sm8250.c
 @@ -3,11 +3,14 @@
@@ -10203,348 +10720,3 @@ diff --git a/sound/soc/qcom/sm8250.c b/sound/soc/qcom/sm8250.c
  }
  
  static const struct of_device_id snd_sm8250_dt_match[] = {
-diff --git a/sound/soc/qcom/qdsp6/q6asm-dai.c b/sound/soc/qcom/qdsp6/q6asm-dai.c
---- a/sound/soc/qcom/qdsp6/q6asm-dai.c
-+++ b/sound/soc/qcom/qdsp6/q6asm-dai.c
-@@ -74,6 +74,10 @@
- 	uint32_t initial_samples_drop;
- 	uint32_t trailing_samples_drop;
- 	bool notify_on_drain;
-+	bool j716f_capture;
-+	bool capture_enabled;
-+	bool capture_waiting_run;
-+	unsigned int capture_inflight;
- };
- 
- struct q6asm_dai_data {
-@@ -176,14 +180,51 @@
- 	.descriptor[0].formats = 0,
- };
- 
-+/* J716F's ADSP accepts capture reads only after the RUN acknowledgement.
-+ * Keep a full period queue, and stop replenishing it before pause/close.
-+ * Do not hold the runtime lock while sending APR packets.
-+ */
-+static void j716f_capture_queue_reads(struct q6asm_dai_rtd *prtd)
-+{
-+	unsigned long flags;
-+	int ret;
-+
-+	for (;;) {
-+		spin_lock_irqsave(&prtd->lock, flags);
-+		if (!prtd->capture_enabled || prtd->capture_waiting_run ||
-+		    prtd->capture_inflight >= prtd->periods) {
-+			spin_unlock_irqrestore(&prtd->lock, flags);
-+			return;
-+		}
-+		prtd->capture_inflight++;
-+		spin_unlock_irqrestore(&prtd->lock, flags);
-+
-+		ret = q6asm_read(prtd->audio_client, prtd->stream_id);
-+		if (ret) {
-+			spin_lock_irqsave(&prtd->lock, flags);
-+			prtd->capture_inflight--;
-+			spin_unlock_irqrestore(&prtd->lock, flags);
-+			pr_warn_ratelimited("J716F: capture read queue failed: %d\n", ret);
-+			return;
-+		}
-+	}
-+}
-+
- static void event_handler(uint32_t opcode, uint32_t token,
- 			  void *payload, void *priv)
- {
- 	struct q6asm_dai_rtd *prtd = priv;
- 	struct snd_pcm_substream *substream = prtd->substream;
-+	unsigned long flags;
- 
- 	switch (opcode) {
- 	case ASM_CLIENT_EVENT_CMD_RUN_DONE:
-+		if (prtd->j716f_capture) {
-+			spin_lock_irqsave(&prtd->lock, flags);
-+			prtd->capture_waiting_run = false;
-+			spin_unlock_irqrestore(&prtd->lock, flags);
-+			j716f_capture_queue_reads(prtd);
-+		}
- 		break;
- 	case ASM_CLIENT_EVENT_CMD_EOS_DONE:
- 		break;
-@@ -191,8 +232,16 @@
- 		snd_pcm_period_elapsed(substream);
- 		break;
- 	case ASM_CLIENT_EVENT_DATA_READ_DONE:
-+		if (prtd->j716f_capture) {
-+			spin_lock_irqsave(&prtd->lock, flags);
-+			if (prtd->capture_inflight)
-+				prtd->capture_inflight--;
-+			spin_unlock_irqrestore(&prtd->lock, flags);
-+		}
- 		snd_pcm_period_elapsed(substream);
--		if (prtd->state == Q6ASM_STREAM_RUNNING)
-+		if (prtd->j716f_capture)
-+			j716f_capture_queue_reads(prtd);
-+		else if (prtd->state == Q6ASM_STREAM_RUNNING)
- 			q6asm_read(prtd->audio_client, prtd->stream_id);
- 
- 		break;
-@@ -209,6 +258,7 @@
- 	struct q6asm_dai_rtd *prtd = runtime->private_data;
- 	struct q6asm_dai_data *pdata;
- 	struct device *dev = component->dev;
-+	unsigned long flags;
- 	int ret, i;
- 
- 	pdata = snd_soc_component_get_drvdata(component);
-@@ -219,6 +269,13 @@
- 		dev_err(dev, "%s: private data null or audio client freed\n",
- 			__func__);
- 		return -EINVAL;
-+	}
-+
-+	if (prtd->j716f_capture) {
-+		spin_lock_irqsave(&prtd->lock, flags);
-+		prtd->capture_enabled = false;
-+		prtd->capture_waiting_run = true;
-+		spin_unlock_irqrestore(&prtd->lock, flags);
- 	}
- 
- 	prtd->pcm_count = snd_pcm_lib_period_bytes(substream);
-@@ -289,9 +346,15 @@
- 							   runtime->channels,
- 							   prtd->bits_per_sample);
- 
--		/* Queue the buffers */
--		for (i = 0; i < runtime->periods; i++)
--			q6asm_read(prtd->audio_client, prtd->stream_id);
-+		if (prtd->j716f_capture) {
-+			/* Previous session was closed before resetting this queue. */
-+			spin_lock_irqsave(&prtd->lock, flags);
-+			prtd->capture_inflight = 0;
-+			spin_unlock_irqrestore(&prtd->lock, flags);
-+		} else {
-+			for (i = 0; i < runtime->periods; i++)
-+				q6asm_read(prtd->audio_client, prtd->stream_id);
-+		}
- 
- 	}
- 	if (ret < 0)
-@@ -335,6 +398,7 @@
- static int q6asm_dai_trigger(struct snd_soc_component *component,
- 			     struct snd_pcm_substream *substream, int cmd)
- {
-+	unsigned long flags;
- 	int ret = 0;
- 	struct snd_pcm_runtime *runtime = substream->runtime;
- 	struct q6asm_dai_rtd *prtd = runtime->private_data;
-@@ -343,21 +407,43 @@
- 	case SNDRV_PCM_TRIGGER_START:
- 	case SNDRV_PCM_TRIGGER_RESUME:
- 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
-+		if (prtd->j716f_capture) {
-+			spin_lock_irqsave(&prtd->lock, flags);
-+			prtd->capture_enabled = true;
-+			prtd->capture_waiting_run = true;
-+			spin_unlock_irqrestore(&prtd->lock, flags);
-+		}
- 		ret = q6asm_run_nowait(prtd->audio_client, prtd->stream_id,
- 				       0, 0, 0);
- 		break;
- 	case SNDRV_PCM_TRIGGER_STOP:
-+		if (prtd->j716f_capture) {
-+			spin_lock_irqsave(&prtd->lock, flags);
-+			prtd->capture_enabled = false;
-+			spin_unlock_irqrestore(&prtd->lock, flags);
-+		}
- 		ret = q6asm_cmd_nowait(prtd->audio_client, prtd->stream_id,
- 				       CMD_EOS);
- 		break;
- 	case SNDRV_PCM_TRIGGER_SUSPEND:
- 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
-+		if (prtd->j716f_capture) {
-+			spin_lock_irqsave(&prtd->lock, flags);
-+			prtd->capture_enabled = false;
-+			spin_unlock_irqrestore(&prtd->lock, flags);
-+		}
- 		ret = q6asm_cmd_nowait(prtd->audio_client, prtd->stream_id,
- 				       CMD_PAUSE);
- 		break;
- 	default:
- 		ret = -EINVAL;
- 		break;
-+	}
-+
-+	if (ret < 0 && prtd->j716f_capture) {
-+		spin_lock_irqsave(&prtd->lock, flags);
-+		prtd->capture_enabled = false;
-+		spin_unlock_irqrestore(&prtd->lock, flags);
- 	}
- 
- 	return ret;
-@@ -387,6 +473,9 @@
- 	if (prtd == NULL)
- 		return -ENOMEM;
- 
-+	spin_lock_init(&prtd->lock);
-+	prtd->j716f_capture = substream->stream == SNDRV_PCM_STREAM_CAPTURE &&
-+			      of_machine_is_compatible("lenovo,j716f");
- 	prtd->substream = substream;
- 	prtd->audio_client = q6asm_audio_client_alloc(dev,
- 				(q6asm_cb)event_handler, prtd, stream_id,
-@@ -460,6 +549,13 @@
- 	struct snd_pcm_runtime *runtime = substream->runtime;
- 	struct snd_soc_pcm_runtime *soc_prtd = snd_soc_substream_to_rtd(substream);
- 	struct q6asm_dai_rtd *prtd = runtime->private_data;
-+	unsigned long flags;
-+
-+	if (prtd->j716f_capture) {
-+		spin_lock_irqsave(&prtd->lock, flags);
-+		prtd->capture_enabled = false;
-+		spin_unlock_irqrestore(&prtd->lock, flags);
-+	}
- 
- 	if (prtd->audio_client) {
- 		if (prtd->state == Q6ASM_STREAM_RUNNING) {
-diff --git a/drivers/gpio/gpiolib.c b/drivers/gpio/gpiolib.c
---- a/drivers/gpio/gpiolib.c
-+++ b/drivers/gpio/gpiolib.c
-@@ -964,7 +964,7 @@
- 	enum gpiod_flags dflags;
- 	const char *name = NULL;
- 	struct gpio_desc *desc;
--	unsigned int num_hogs;
-+	unsigned int num_hogs, offset;
- 	unsigned long lflags;
- 	int ret, argc;
- 	/*
-@@ -1027,8 +1027,9 @@
- 				gpiospec.args[j] = gpios[i * cells + j];
- 
- 			ret = of_gpiochip_get_lflags(gc, &gpiospec, &lflags);
--			if (ret)
-+			if (ret < 0)
- 				return ret;
-+			offset = ret;
- 
- 			/*
- 			 * If no line-name property is present, fall back to the OF
-@@ -1037,6 +1038,7 @@
- 			if (!name)
- 				name = to_of_node(fwnode)->name;
- 		} else {
-+			offset = gpios[i * cells];
- 			/*
- 			 * GPIO_ACTIVE_LOW is currently the only lookup flag
- 			 * supported for non-OF firmware nodes.
-@@ -1045,7 +1047,7 @@
- 				lflags |= GPIO_ACTIVE_LOW;
- 		}
- 
--		desc = gpiochip_get_desc(gc, gpios[i * cells]);
-+		desc = gpiochip_get_desc(gc, offset);
- 		if (IS_ERR(desc))
- 			return PTR_ERR(desc);
- 
-diff --git a/drivers/gpio/gpiolib-of.c b/drivers/gpio/gpiolib-of.c
---- a/drivers/gpio/gpiolib-of.c
-+++ b/drivers/gpio/gpiolib-of.c
-@@ -741,7 +741,8 @@
- 
- 	*lflags = of_convert_gpio_flags(xlate_flags);
- 
--	return 0;
-+	/* Preserve controller-specific numbering (e.g. one-based PMIC GPIOs). */
-+	return gpiod_hwgpio(desc);
- }
- 
- #ifdef CONFIG_OF_DYNAMIC
-diff --git a/arch/arm64/boot/dts/qcom/sm8250.dtsi b/arch/arm64/boot/dts/qcom/sm8250.dtsi
---- a/arch/arm64/boot/dts/qcom/sm8250.dtsi
-+++ b/arch/arm64/boot/dts/qcom/sm8250.dtsi
-@@ -13,6 +13,7 @@
- #include <dt-bindings/firmware/qcom,scm.h>
- #include <dt-bindings/gpio/gpio.h>
- #include <dt-bindings/interconnect/qcom,osm-l3.h>
-+#include <dt-bindings/interconnect/qcom,icc.h>
- #include <dt-bindings/interconnect/qcom,sm8250.h>
- #include <dt-bindings/mailbox/qcom-ipcc.h>
- #include <dt-bindings/phy/phy-qcom-qmp.h>
-@@ -107,7 +108,8 @@
- 			power-domain-names = "psci";
- 			qcom,freq-domain = <&cpufreq_hw 0>;
- 			operating-points-v2 = <&cpu0_opp_table>;
--			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
-+			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
-+					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
- 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
- 			#cooling-cells = <2>;
- 			l2_0: l2-cache {
-@@ -138,7 +140,8 @@
- 			power-domain-names = "psci";
- 			qcom,freq-domain = <&cpufreq_hw 0>;
- 			operating-points-v2 = <&cpu0_opp_table>;
--			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
-+			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
-+					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
- 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
- 			#cooling-cells = <2>;
- 			l2_100: l2-cache {
-@@ -163,7 +166,8 @@
- 			power-domain-names = "psci";
- 			qcom,freq-domain = <&cpufreq_hw 0>;
- 			operating-points-v2 = <&cpu0_opp_table>;
--			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
-+			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
-+					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
- 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
- 			#cooling-cells = <2>;
- 			l2_200: l2-cache {
-@@ -188,7 +192,8 @@
- 			power-domain-names = "psci";
- 			qcom,freq-domain = <&cpufreq_hw 0>;
- 			operating-points-v2 = <&cpu0_opp_table>;
--			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
-+			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
-+					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
- 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
- 			#cooling-cells = <2>;
- 			l2_300: l2-cache {
-@@ -213,7 +218,8 @@
- 			power-domain-names = "psci";
- 			qcom,freq-domain = <&cpufreq_hw 1>;
- 			operating-points-v2 = <&cpu4_opp_table>;
--			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
-+			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
-+					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
- 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
- 			#cooling-cells = <2>;
- 			l2_400: l2-cache {
-@@ -238,7 +244,8 @@
- 			power-domain-names = "psci";
- 			qcom,freq-domain = <&cpufreq_hw 1>;
- 			operating-points-v2 = <&cpu4_opp_table>;
--			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
-+			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
-+					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
- 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
- 			#cooling-cells = <2>;
- 			l2_500: l2-cache {
-@@ -263,7 +270,8 @@
- 			power-domain-names = "psci";
- 			qcom,freq-domain = <&cpufreq_hw 1>;
- 			operating-points-v2 = <&cpu4_opp_table>;
--			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
-+			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
-+					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
- 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
- 			#cooling-cells = <2>;
- 			l2_600: l2-cache {
-@@ -288,7 +296,8 @@
- 			power-domain-names = "psci";
- 			qcom,freq-domain = <&cpufreq_hw 2>;
- 			operating-points-v2 = <&cpu7_opp_table>;
--			interconnects = <&gem_noc MASTER_AMPSS_M0 0 &mc_virt SLAVE_EBI_CH0 0>,
-+			interconnects = <&gem_noc MASTER_AMPSS_M0 QCOM_ICC_TAG_ACTIVE_ONLY
-+					&mc_virt SLAVE_EBI_CH0 QCOM_ICC_TAG_ACTIVE_ONLY>,
- 					<&epss_l3 MASTER_OSM_L3_APPS &epss_l3 SLAVE_OSM_L3>;
- 			#cooling-cells = <2>;
- 			l2_700: l2-cache {

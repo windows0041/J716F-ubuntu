@@ -1,5 +1,5 @@
 {
-  "date": "2026-11-10",
+  "date": "2026-11-11",
   "kernel": {
     "version": "7.4-rc2",
     "tag": "v7.4-rc2",
@@ -36,16 +36,20 @@
   ],
   "baseline_project_commit": "a4e3ee39de7e84807e3377610834be4e8e9da15b",
   "patch": "patches/kernel/linux-7.4-rc2-j716f.patch",
-  "patch_sha256": "1b39816348e566a9f71fdfbdc0bcf3bef87fb88c79d316d21a9cafdef8f58f12",
+  "patch_sha256": "c2cbd911a7f9d17b59eb866dfc56ea5089e95b75b304ce9b04246cb980a479dc",
   "config": "configs/kernel/j716f-7.4-rc2.config",
-  "config_sha256": "80674a717c5a4d86cf31a5f106f6c99573e3357aead51a1fd18690ed9fc2b323",
+  "config_sha256": "03cac6747ed94b2b9f5db1028f2d178519ca2605238eaaa21ac9aa0cbe7aa588",
   "changed_source_files": [
     "Documentation/devicetree/bindings/input/goodix-fingerprint.yaml",
+    "Documentation/devicetree/bindings/usb/onnn,nb7vpq904m.yaml",
     "arch/arm64/boot/dts/qcom/Makefile",
     "arch/arm64/boot/dts/qcom/sm8250-lenovo-j716f.dts",
+    "arch/arm64/boot/dts/qcom/sm8250.dtsi",
     "drivers/clk/qcom/dispcc-sm8250.c",
     "drivers/firmware/qcom/qcom_scm-smc.c",
     "drivers/firmware/qcom/qcom_scm.c",
+    "drivers/gpio/gpiolib-of.c",
+    "drivers/gpio/gpiolib.c",
     "drivers/gpu/drm/msm/dsi/dsi_host.c",
     "drivers/gpu/drm/msm/dsi/phy/dsi_phy.c",
     "drivers/gpu/drm/msm/dsi/phy/dsi_phy_7nm.c",
@@ -74,6 +78,7 @@
     "drivers/tee/qseecom/Kconfig",
     "drivers/tee/qseecom/Makefile",
     "drivers/tee/qseecom/core.c",
+    "drivers/usb/typec/mux/nb7vpq904m.c",
     "include/linux/firmware/qcom/qcom_scm.h",
     "include/linux/soc/qcom/mdt_loader.h",
     "include/sound/cs35l41.h",
@@ -86,13 +91,10 @@
     "sound/soc/qcom/common.c",
     "sound/soc/qcom/qdsp6/q6afe-dai.c",
     "sound/soc/qcom/qdsp6/q6afe.c",
+    "sound/soc/qcom/qdsp6/q6asm-dai.c",
     "sound/soc/qcom/qdsp6/q6dsp-lpass-clocks.c",
     "sound/soc/qcom/qdsp6/q6routing.c",
-    "sound/soc/qcom/sm8250.c",
-    "sound/soc/qcom/qdsp6/q6asm-dai.c",
-    "drivers/gpio/gpiolib.c",
-    "drivers/gpio/gpiolib-of.c",
-    "arch/arm64/boot/dts/qcom/sm8250.dtsi"
+    "sound/soc/qcom/sm8250.c"
   ],
   "reference_port": {
     "repository": "https://github.com/wanfanggreat/j716f-mainline-kernel",
@@ -125,12 +127,16 @@
     "scope": "complete debugged kernel source, patches, configuration and diagnostics; no universal install image",
     "complete_kernel_source": "kernel/linux-7.4-rc2",
     "kernel_source_manifest": "docs/mainline/kernel-source-manifest.json",
-    "validation_date": "2026-11-10",
-    "changed_source_files_verified": 53,
+    "validation_date": "2026-11-11",
+    "changed_source_files_verified": 55,
     "kernel_configuration_and_modules_built": true,
     "boot_white_line_absent_user_verified": true,
     "reserved_firmware_memory_mib": 87,
     "long_term_stability_certified": false,
-    "firmware_and_private_device_state_in_git": false
+    "firmware_and_private_device_state_in_git": false,
+    "usb_typec_roles_and_redriver_source_included": true,
+    "usb_negotiated_speed_verified_mbps": 480,
+    "usb_superspeed_verified": false,
+    "daily_initramfs_telnet_removed": true
   }
 }

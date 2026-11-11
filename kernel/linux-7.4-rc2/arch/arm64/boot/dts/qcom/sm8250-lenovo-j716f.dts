@@ -729,7 +729,35 @@
 	clock-frequency = <400000>;
 	status = "okay";
 
-	/* onsemi NB7VPQ904M USB redriver @ 19 */
+	typec-mux@19 {
+		compatible = "onnn,nb7vpq904m";
+		reg = <0x19>;
+		/* Board supply referenced by the ZUI redriver node. */
+		vcc-supply = <&vreg_l16a_3p3>;
+		orientation-switch;
+		retimer-switch;
+		mode-switch;
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				j716f_redriver_connector: endpoint {
+					remote-endpoint = <&j716f_typec_ss>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+				j716f_redriver_phy: endpoint {
+					remote-endpoint = <&usb_1_qmpphy_out>;
+					data-lanes = <0 1 2 3>;
+				};
+			};
+		};
+	};
 
 	/* Four CS35L41 speaker amplifiers (vendor DT fragment@55):
 	 * all share reset gpio 131; IRQs are 67, 113, 126, 68.
@@ -2266,7 +2294,9 @@
 };
 
 &usb_1_dwc3 {
-	dr_mode = "peripheral";
+	dr_mode = "otg";
+	usb-role-switch;
+	role-switch-default-mode = "peripheral";
 };
 
 &usb_1_hsphy {
@@ -2450,4 +2480,56 @@
  */
 &{/soc@0/timer@17c20000} {
 	status = "disabled";
+};
+
+&pm8150b_vbus {
+	regulator-name = "usb-c-vbus";
+	regulator-min-microamp = <500000>;
+	regulator-max-microamp = <500000>;
+	status = "okay";
+};
+
+&pm8150b_typec {
+	vdd-pdphy-supply = <&vreg_l2a_3p1>;
+	status = "okay";
+
+	connector {
+		compatible = "usb-c-connector";
+		label = "USB-C";
+		power-role = "dual";
+		data-role = "dual";
+		try-power-role = "sink";
+		self-powered;
+		vbus-supply = <&pm8150b_vbus>;
+		/* Validate data-role switching without PD resets during enumeration. */
+		pd-disable;
+		typec-power-opmode = "default";
+
+		ports {
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			port@0 {
+				reg = <0>;
+				j716f_typec_hs: endpoint {
+					remote-endpoint = <&usb_1_dwc3_hs_out>;
+				};
+			};
+
+			port@1 {
+				reg = <1>;
+				j716f_typec_ss: endpoint {
+					remote-endpoint = <&j716f_redriver_connector>;
+				};
+			};
+		};
+	};
+};
+
+&usb_1_dwc3_hs_out {
+	remote-endpoint = <&j716f_typec_hs>;
+};
+
+&usb_1_qmpphy_out {
+	remote-endpoint = <&j716f_redriver_phy>;
 };

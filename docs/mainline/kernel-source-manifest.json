@@ -2,13 +2,13 @@
   "path": "kernel/linux-7.4-rc2",
   "upstream_commit": "7475ea8b58616b33c04afb976cf0fbaad9dd63fb",
   "archive_sha256": "0f8da6fb05d5dcec8ed0847a0e503d3f8301b687aad175ad2436f1ab0a1762db",
-  "patch_sha256": "1b39816348e566a9f71fdfbdc0bcf3bef87fb88c79d316d21a9cafdef8f58f12",
+  "patch_sha256": "c2cbd911a7f9d17b59eb866dfc56ea5089e95b75b304ce9b04246cb980a479dc",
   "config_path": "kernel/linux-7.4-rc2/j716f.config",
-  "config_sha256": "80674a717c5a4d86cf31a5f106f6c99573e3357aead51a1fd18690ed9fc2b323",
+  "config_sha256": "03cac6747ed94b2b9f5db1028f2d178519ca2605238eaaa21ac9aa0cbe7aa588",
   "source_files": 97370,
-  "source_bytes": 1676270884,
-  "source_inventory_sha256": "c3938d70fafd724037166080522912005b99b0a2a948137d165fafd228f9820e",
-  "every_exported_entry_matches_debugged_tree": true,
+  "source_bytes": 1676273260,
+  "source_inventory_sha256": "634852824216ca9733f9ebde1bb6ae5b2252bc04adaf0e2be478674cbbf107b0",
+  "every_exported_entry_matches_debugged_tree": false,
   "configuration_reference_name": ".config",
   "generated_build_outputs_included": false,
   "upstream_test_and_documentation_assets_preserved": true,
@@ -34,6 +34,8 @@
       "bytes": 14373916
     }
   ],
-  "git_tree_oid": "1e55937ff1586ae8070f9809b55ab000233765d1",
+  "every_exported_entry_matches_reconstructed_tree": true,
+  "verification_reference": "Pinned upstream archive plus cumulative patch; previously tested USB runtime overlay integrated into board DTS",
+  "git_tree_oid": "1529f3e240d742a5180e7ee8d6f5048538925400",
   "staged_inventory_matches_verified_export": true
 }

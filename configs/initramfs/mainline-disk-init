@@ -1,5 +1,5 @@
 #!/bin/sh
-# Disk diagnostic: mount only the pinned userdata filesystem; no installer.
+# Mount the installed Ubuntu filesystem.
 export PATH=/bin:/sbin:/usr/bin:/usr/sbin
 mount -t proc none /proc
 mount -t sysfs none /sys
@@ -7,29 +7,17 @@ mount -t devtmpfs none /dev
 mkdir -p /dev/pts /run /sys/kernel/config
 mount -t devpts none /dev/pts
 mount -t tmpfs none /run
-# Keep routine early-boot output off the display; preserve it for diagnostics.
-mkdir -p /run/j716f-boot
-chmod 700 /run/j716f-boot
+# Show boot messages only when explicitly requested for recovery.
 case " $(cat /proc/cmdline) " in
     *" j716f.boot_verbose=1 "*) ;;
-    *)
-        umask 077
-        exec >/run/j716f-boot/init.log 2>&1
-        ;;
+    *) exec >/dev/null 2>&1 ;;
 esac
 mount -t configfs none /sys/kernel/config
 # Expose the previous boot console without modifying persistent records.
 mkdir -p /sys/fs/pstore
 mount -t pstore -o ro pstore /sys/fs/pstore 2>/dev/null || true
 
-echo "=== TB-J716F mainline disk diagnostic ==="
-uname -a
-echo "Prepared userdata ext4 root will be mounted after UUID and image checks."
-echo "USB shell: 172.16.30.1:23; host address: 172.16.30.2/25"
-
-for role in /sys/class/usb_role/*/role; do
-    [ ! -e "$role" ] || echo device > "$role"
-done
+/bin/busybox insmod /bin/nb7vpq904m.ko || echo "USB 3 redriver driver failed to load"
 
 G=/sys/kernel/config/usb_gadget/j716f_diag
 mkdir -p "$G"
@@ -43,9 +31,9 @@ if [ -d "$G" ]; then
     echo 0x01 > "$G/bDeviceProtocol"
     mkdir -p "$G/strings/0x409" "$G/configs/c.1/strings/0x409"
     echo J716F > "$G/strings/0x409/manufacturer"
-    echo "Mainline disk diagnostic" > "$G/strings/0x409/product"
+    echo "Ubuntu USB network" > "$G/strings/0x409/product"
     echo j716f-diag > "$G/strings/0x409/serialnumber"
-    echo "USB diagnostics" > "$G/configs/c.1/strings/0x409/configuration"
+    echo "USB network" > "$G/configs/c.1/strings/0x409/configuration"
     echo 250 > "$G/configs/c.1/MaxPower"
     for function in rndis ecm; do
         if mkdir -p "$G/functions/$function.usb0"; then
@@ -68,7 +56,7 @@ if [ -d "$G" ]; then
         fi
     done
     attempts=0
-    while [ "$attempts" -lt 60 ]; do
+    while [ "$attempts" -lt 8 ]; do
         controller=""
         for node in /sys/class/udc/*; do
             [ ! -e "$node" ] || { controller=${node##*/}; break; }
@@ -83,38 +71,9 @@ if [ -d "$G" ]; then
     done
 fi
 
-attempts=0
-while [ "$attempts" -lt 60 ]; do
-    interface=""
-    for name in usb0 usb1 eth0; do
-        [ ! -e "/sys/class/net/$name" ] || { interface=$name; break; }
-    done
-    if [ -n "$interface" ]; then
-        ip link set "$interface" up
-        ip addr add 172.16.30.1/25 dev "$interface"
-        # No gateway or DNS option: this link is only for local diagnostics.
-        cat > /run/j716f-udhcpd.conf <<EOF
-start 172.16.30.2
-end 172.16.30.2
-interface $interface
-max_leases 1
-option subnet 255.255.255.128
-option lease 86400
-lease_file /run/j716f-udhcpd.leases
-pidfile /run/j716f-udhcpd.pid
-EOF
-        /bin/busybox udhcpd /run/j716f-udhcpd.conf > /run/j716f-udhcpd.log 2>&1
-        telnetd -b 172.16.30.1:23 -l /bin/sh
-        echo "USB-only diagnostic shell started on $interface"
-        break
-    fi
-    attempts=$((attempts + 1))
-    sleep 0.5
-done
-
 if /bin/mainline-mount-disk-root; then
     exec /bin/busybox switch_root -c /dev/console /newroot /sbin/init
 fi
-echo "Disk root validation failed; staying in RAM diagnostics."
+echo "Ubuntu root filesystem could not be mounted."
 setsid cttyhack /bin/sh </dev/console >/dev/console 2>&1 &
 while :; do sleep 60; done

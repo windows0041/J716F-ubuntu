@@ -4,7 +4,7 @@
 set -eu
 bb() { /bin/busybox "$@"; }
 fail() { echo "Disk root: $*" >&2; exit 1; }
-[ "$PPID" = 1 ] || fail "must be called by diagnostic PID 1"
+[ "$PPID" = 1 ] || fail "must be called by initramfs PID 1"
 bb tr '\000' '\n' < /sys/firmware/devicetree/base/compatible | bb grep -qx lenovo,j716f || fail "wrong board"
 [ "$(bb uname -r)" = 7.4.0-rc2-j716f ] || fail "wrong kernel"
 bb awk '$2 == "/" && $3 == "rootfs" { ok=1 } END { exit !ok }' /proc/mounts || fail "not initramfs"
@@ -45,7 +45,7 @@ bb mkdir -p /newroot
 [ -z "$(bb ls -A /newroot)" ] || fail "root mount point not empty"
 # Recover the unmounted, UUID-pinned filesystem before any kernel mount.
 # Preen repairs only journal/orphan and other automatically repairable errors.
-# An unresolved error keeps the device in the RAM diagnostic environment.
+# An unresolved error keeps the device in the initramfs recovery environment.
 fsck=/lib/j716f-fsck
 [ -x "$fsck/ld-linux-aarch64.so.1" ] && [ -x "$fsck/e2fsck" ] || fail "missing filesystem checker"
 result=0
@@ -66,9 +66,6 @@ done
 bb mkdir -p /run/j716f-disk-desktop
 printf '%s\n' "$device" > /run/j716f-disk-desktop/device
 bb touch /run/j716f-disk-desktop/active
-bb killall telnetd || true
-bb killall udhcpd || true
 for directory in dev proc sys run; do
     bb mount --move "/$directory" "/newroot/$directory"
 done
-echo "Validated userdata root ready; starting Ubuntu systemd."

@@ -1,6 +1,6 @@
 # 当前关键修正
 
-全部内核改动已包含于 linux-7.4-rc2-j716f.patch，相对 sources.json 指定的上游提交，共 53 个文件。以下是问题与验证范围的摘要。
+全部内核改动已包含于 linux-7.4-rc2-j716f.patch，相对 sources.json 指定的上游提交，共 55 个文件。以下是问题与验证范围的摘要。
 
 ## 固件预留内存
 
@@ -21,6 +21,20 @@ J716F 的 MDP 时钟注册改用现有 `clk_rcg2_shared_no_init_park_ops`，避�
 ## 充电进入桌面后蓝牙不可用
 
 BlueZ 在充电模式启动正常，但进入桌面的 isolate graphical.target 操作会停止未列入桌面依赖的 Bluetooth target。新增 graphical.target 的 Wants=bluetooth.target，恢复服务后控制器 Powered=yes，用户确认开关与扫描正常。修正后的完整物理充电→桌面流程尚待再次验证。
+
+## USB-C 角色与高速通道
+
+板级 DTS 启用 PM8150B Type-C/VBUS，将 DWC3、连接器、QMP PHY 和 NB7VPQ904M 连接起来。当前禁用 PD 协商，优先受电，DWC3 使用 OTG 角色切换；主机与快充功能尚待外设验证。
+
+NB7VPQ904M 原驱动只注册 retimer，普通 USB 的 mode-switch 事件没有到达该芯片。增加可选 mux 注册并共用模式设置路径，使 USB 模式与插头方向共同决定通道；保留原有 retimer 接口，并补齐 clientdata 与释放路径。实机正反插能恢复网络，芯片通道状态随方向变化。现有连接仅协商到 480 Mbps，同线、同电脑连接对照手机也为 480 Mbps，尚不能宣称 USB 3.x 已实测通过。
+
+曾强制 `maximum-speed = "super-speed"` 导致当前 SM8250 映射范围外的寄存器访问；现保留控制器自动协商，没有修改 DWC3 核心或宣称解决全部高速链路问题。
+
+## 日常启动与重启
+
+清理后的磁盘 initramfs 保留 RNDIS/ECM 描述符、根文件系统身份及内核摘要检查、离线 fsck 和失败恢复入口，移除 Telnet、早期 DHCP 和常驻启动日志。USB 地址与 DHCP 由 Ubuntu 的专用网络服务设置，日常远程登录使用另行配置的 SSH。
+
+systemd 的重启看门狗在该平台产生超时不支持及无法停止的屏幕提示。运行配置设为 `RebootWatchdogSec=off` 后，用户确认重启无提示、正常进入桌面。这只关闭重启阶段的看门狗接管，不禁用驱动或改写内核错误日志。
 
 ## 其他已验证工作
 
