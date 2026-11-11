@@ -1,0 +1,10 @@
+{
+  "close_lux": 3.0,
+  "open_lux": 20.0,
+  "open_seconds": 4.0,
+  "dark_seconds": 4.0,
+  "transition_seconds": 5.0,
+  "drop_ratio": 0.1,
+  "resume_grace": 20.0,
+  "maximum_gap": 2.0
+}

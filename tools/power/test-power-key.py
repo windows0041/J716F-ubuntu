@@ -3,6 +3,8 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 spec = importlib.util.spec_from_file_location('power_key', Path(__file__).with_name('power-key.py'))
 module = importlib.util.module_from_spec(spec)
@@ -67,6 +69,34 @@ class TimingTests(unittest.TestCase):
         key.press(10)
         key.release(12)
         self.assertIsNone(key.hold(100))
+
+
+class LockTests(unittest.TestCase):
+    def desktop(self, locked):
+        desktop = module.Desktop.__new__(module.Desktop)
+        desktop.is_locked = Mock(side_effect=locked)
+        desktop.call = Mock(return_value='()')
+        return desktop
+
+    def test_already_locked_does_not_repeat_hanging_lock_call(self):
+        desktop = self.desktop([True])
+        account = SimpleNamespace(pw_uid=1001)
+        desktop.lock(account)
+        desktop.call.assert_not_called()
+
+    def test_unlocked_session_is_locked_before_success(self):
+        desktop = self.desktop([False, False, True])
+        account = SimpleNamespace(pw_uid=1001)
+        with patch.object(module.time, 'sleep'):
+            desktop.lock(account)
+        desktop.call.assert_called_once_with(account, 'org.gnome.ScreenSaver',
+            '/org/gnome/ScreenSaver', 'org.gnome.ScreenSaver.Lock')
+
+    def test_failed_lock_is_not_reported_as_success(self):
+        desktop = self.desktop([False] * 21)
+        with patch.object(module.time, 'sleep'):
+            with self.assertRaises(RuntimeError):
+                desktop.lock(SimpleNamespace(pw_uid=1001))
 
 
 if __name__ == '__main__':

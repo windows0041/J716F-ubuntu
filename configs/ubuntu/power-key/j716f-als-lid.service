@@ -1,0 +1,23 @@
+[Unit]
+Description=J716F light-sensor cover suspend
+Requires=j716f-power-key.service
+Wants=iio-sensor-proxy.service
+After=j716f-power-key.service iio-sensor-proxy.service
+PartOf=graphical.target
+Conflicts=j716f-charge-only.service
+ConditionPathExists=/run/j716f-disk-desktop/active
+
+[Service]
+Type=simple
+ExecStart=/usr/local/sbin/j716f-als-lid
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=j716f-als-lid
+RuntimeDirectoryMode=0700
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+
+[Install]
+WantedBy=graphical.target

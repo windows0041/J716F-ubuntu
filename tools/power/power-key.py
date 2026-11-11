@@ -107,13 +107,20 @@ class Desktop:
                   'org.freedesktop.DBus.Properties.Set',
                   'org.gnome.Mutter.DisplayConfig', 'PowerSaveMode', '<int32 0>')
 
+    def is_locked(self, account):
+        seat = self.properties('/org/freedesktop/login1/seat/seat0',
+                               'org.freedesktop.login1.Seat')
+        _, path = seat['ActiveSession']
+        session = self.properties(path, 'org.freedesktop.login1.Session')
+        return session['User'][0] == account.pw_uid and session['LockedHint']
+
     def lock(self, account):
+        if self.is_locked(account):
+            return
         self.call(account, 'org.gnome.ScreenSaver', '/org/gnome/ScreenSaver',
                   'org.gnome.ScreenSaver.Lock')
         for _ in range(20):
-            result = self.call(account, 'org.gnome.ScreenSaver', '/org/gnome/ScreenSaver',
-                               'org.gnome.ScreenSaver.GetActive')
-            if result == '(true,)':
+            if self.is_locked(account):
                 return
             time.sleep(0.1)
         raise RuntimeError('Screen did not lock; refusing to suspend')
