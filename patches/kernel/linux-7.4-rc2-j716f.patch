@@ -5890,6 +5890,20 @@
  	{ }
  };
  MODULE_DEVICE_TABLE(of, goodix_berlin_i2c_of_match);
+--- a/drivers/power/supply/bq27xxx_battery.c
++++ b/drivers/power/supply/bq27xxx_battery.c
+@@ -1912,7 +1912,10 @@
+ 		val_curr->intval = curr;
+ 
+ 	if (val_status) {
+-		if (bq27xxx_battery_is_full(di, flags))
++		/* J716F retains FC below 100% after unplugging the charger. */
++		if (curr < 0 && of_machine_is_compatible("lenovo,j716f"))
++			val_status->intval = POWER_SUPPLY_STATUS_DISCHARGING;
++		else if (bq27xxx_battery_is_full(di, flags))
+ 			val_status->intval = POWER_SUPPLY_STATUS_FULL;
+ 		else if (curr > 0)
+ 			val_status->intval = POWER_SUPPLY_STATUS_CHARGING;
 --- a/drivers/power/supply/bq27xxx_battery_i2c.c
 +++ b/drivers/power/supply/bq27xxx_battery_i2c.c
 @@ -153,6 +153,7 @@

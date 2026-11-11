@@ -21,7 +21,7 @@
 ## 源码布局
 
 ```text
-patches/kernel/linux-7.4-rc2-j716f.patch   当前 55 文件组合补丁
+patches/kernel/linux-7.4-rc2-j716f.patch   当前 56 文件组合补丁
 kernel/linux-7.4-rc2/                    完整、已调试的主线内核源码
 configs/kernel/j716f-7.4-rc2.config       已构建的内核配置
 configs/ubuntu/                         音频、指纹、充电、USB 网络与桌面配置

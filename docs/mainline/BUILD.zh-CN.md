@@ -65,6 +65,7 @@ cc -std=c11 -Wall -Wextra -Werror \
   tools/power/test-charge-vbus.c -o build/checks/test-charge-vbus
 build/checks/test-charge-vbus
 python3 tools/input/test_reprobe_keyboard.py
+python3 tools/power/test-battery-status.py
 ```
 
 ARM64 充电界面可交叉编译：

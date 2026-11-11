@@ -2,12 +2,12 @@
   "path": "kernel/linux-7.4-rc2",
   "upstream_commit": "7475ea8b58616b33c04afb976cf0fbaad9dd63fb",
   "archive_sha256": "0f8da6fb05d5dcec8ed0847a0e503d3f8301b687aad175ad2436f1ab0a1762db",
-  "patch_sha256": "c2cbd911a7f9d17b59eb866dfc56ea5089e95b75b304ce9b04246cb980a479dc",
+  "patch_sha256": "d91019f57be6bff4da737540f4a649b4d43004eb39212869db32ddd24473081f",
   "config_path": "kernel/linux-7.4-rc2/j716f.config",
   "config_sha256": "03cac6747ed94b2b9f5db1028f2d178519ca2605238eaaa21ac9aa0cbe7aa588",
   "source_files": 97370,
-  "source_bytes": 1676273260,
-  "source_inventory_sha256": "634852824216ca9733f9ebde1bb6ae5b2252bc04adaf0e2be478674cbbf107b0",
+  "source_bytes": 1676273448,
+  "source_inventory_sha256": "bd206e08eab1ade34c9de623bdf9d0c996de1a31dd881f38f3eed8bf5a1b9673",
   "every_exported_entry_matches_debugged_tree": false,
   "configuration_reference_name": ".config",
   "generated_build_outputs_included": false,
@@ -36,6 +36,6 @@
   ],
   "every_exported_entry_matches_reconstructed_tree": true,
   "verification_reference": "Pinned upstream archive plus cumulative patch; previously tested USB runtime overlay integrated into board DTS",
-  "git_tree_oid": "1529f3e240d742a5180e7ee8d6f5048538925400",
+  "git_tree_oid": "6344876492919fb9c14500502fa4410bd5b44596",
   "staged_inventory_matches_verified_export": true
 }

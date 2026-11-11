@@ -56,3 +56,9 @@ GNOME 自带屏幕键盘，无需额外安装键盘程序。`configs/ubuntu/dcon
 当前用户明确选择仅让 Chrome 使用本地密码存储，接受其保存凭据不再由系统登录密钥环保护。`configs/ubuntu/desktop/j716f-chrome` 对应可执行的 `/usr/local/bin/j716f-chrome`；该用户的 Chrome desktop 文件中，主入口、新窗口和无痕窗口的 Exec 均改为调用此包装器，保留 Wayland 参数。
 
 这是可选的个人配置，不自动施加给其他用户；不修改账户密码，不清空登录密钥环。原 desktop 文件另行备份，设置过程未改写浏览器配置目录；实测 Chrome 主进程带有 `--password-store=basic`，同时登录密钥环仍锁定。重新开机后，用户再次从图标打开 Chrome，确认没有密钥环密码提示。
+
+## Wi-Fi 自动连接与密钥环
+
+Chrome 的本地密码存储不会改写系统 Wi-Fi 凭据。本机一次启动时，NetworkManager 日志显示缺少认证信息；用户重新连接后，密码才写入 Netplan 永久配置。已重新持久保存活动配置，启用自动连接，设置 PSK 由 NetworkManager 管理（psk-flags=0），并验证保存密码的文件权限为 0600。
+
+Ubuntu 使用 Netplan 后端时，活动连接的文件出现在 /run/NetworkManager/system-connections 本身不表示密码已丢失；应同时检查 /etc/netplan 的持久配置。保存密码后重新生成 Netplan 配置、重启 NetworkManager 和 wpa_supplicant，实测无需新密码请求即可自动连接；此时登录密钥环仍处于锁定状态。现场 Wi-Fi 凭据、网络名及原配置备份不纳入仓库。

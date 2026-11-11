@@ -36,7 +36,7 @@
   ],
   "baseline_project_commit": "a4e3ee39de7e84807e3377610834be4e8e9da15b",
   "patch": "patches/kernel/linux-7.4-rc2-j716f.patch",
-  "patch_sha256": "c2cbd911a7f9d17b59eb866dfc56ea5089e95b75b304ce9b04246cb980a479dc",
+  "patch_sha256": "d91019f57be6bff4da737540f4a649b4d43004eb39212869db32ddd24473081f",
   "config": "configs/kernel/j716f-7.4-rc2.config",
   "config_sha256": "03cac6747ed94b2b9f5db1028f2d178519ca2605238eaaa21ac9aa0cbe7aa588",
   "changed_source_files": [
@@ -67,6 +67,7 @@
     "drivers/input/touchscreen/goodix.h",
     "drivers/input/touchscreen/goodix_berlin_core.c",
     "drivers/input/touchscreen/goodix_berlin_i2c.c",
+    "drivers/power/supply/bq27xxx_battery.c",
     "drivers/power/supply/bq27xxx_battery_i2c.c",
     "drivers/regulator/qcom-rpmh-regulator.c",
     "drivers/soc/qcom/mdt_loader.c",
@@ -128,7 +129,7 @@
     "complete_kernel_source": "kernel/linux-7.4-rc2",
     "kernel_source_manifest": "docs/mainline/kernel-source-manifest.json",
     "validation_date": "2026-11-11",
-    "changed_source_files_verified": 55,
+    "changed_source_files_verified": 56,
     "kernel_configuration_and_modules_built": true,
     "boot_white_line_absent_user_verified": true,
     "reserved_firmware_memory_mib": 87,
@@ -137,6 +138,11 @@
     "usb_typec_roles_and_redriver_source_included": true,
     "usb_negotiated_speed_verified_mbps": 480,
     "usb_superspeed_verified": false,
-    "daily_initramfs_telnet_removed": true
+    "daily_initramfs_telnet_removed": true,
+    "j716f_battery_status_priority": "negative current takes precedence over retained full flag",
+    "battery_status_extracted_driver_test_cases": 9,
+    "battery_status_new_boot_verified": true,
+    "battery_unplug_ui_user_verified": true,
+    "battery_charge_direction_user_verified": true
   }
 }

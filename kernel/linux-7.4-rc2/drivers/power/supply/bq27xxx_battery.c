@@ -1912,7 +1912,10 @@ static int bq27xxx_battery_current_and_status(
 		val_curr->intval = curr;
 
 	if (val_status) {
-		if (bq27xxx_battery_is_full(di, flags))
+		/* J716F retains FC below 100% after unplugging the charger. */
+		if (curr < 0 && of_machine_is_compatible("lenovo,j716f"))
+			val_status->intval = POWER_SUPPLY_STATUS_DISCHARGING;
+		else if (bq27xxx_battery_is_full(di, flags))
 			val_status->intval = POWER_SUPPLY_STATUS_FULL;
 		else if (curr > 0)
 			val_status->intval = POWER_SUPPLY_STATUS_CHARGING;
