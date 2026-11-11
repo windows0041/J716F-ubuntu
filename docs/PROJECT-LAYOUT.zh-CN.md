@@ -17,6 +17,8 @@
 | `tools/release/` | 镜像导出、清理、初始化、合并、安装及修正脚本 |
 | `tools/project/` | 源码快照和本地仓库检查工具 |
 | `tools/input/`、`tools/sensors/` | 输入与传感器运行脚本 |
+| `tools/camera/` | 7.4 独立相机驱动源码、构建/安装及 CMA 启动参数工具 |
+| `tools/network/` | 本机固定 Wi-Fi MAC 与旧连接绑定修正 |
 | `tools/display-scaling/` | 当前显示修正源码、补丁和构建脚本 |
 | `tools/stability/` | 稳定性记录服务与配置 |
 | `tools/fingerprint-system/` | 用户态构建入口、服务单元及控制程序源码 |

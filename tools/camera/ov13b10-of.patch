@@ -1,0 +1,31 @@
+Subject: [PATCH] media: ov13b10: match the J716F device-tree sensor
+
+The 7.4 base driver only supplies the ACPI match table, leaving J716F's
+ovti,ov13b10 device unbound. Add its OF match table without changing the
+register sequences. Tested with 1080p capture and GNOME Snapshot on J716F.
+
+Prepared with Codex assistance. No upstream submission or DCO
+certification is implied.
+
+---
+--- a/ov13b10.c
++++ b/ov13b10.c
+@@ -1706,11 +1706,18 @@
+ MODULE_DEVICE_TABLE(acpi, ov13b10_acpi_ids);
+ #endif
+ 
++static const struct of_device_id ov13b10_of_match[] = {
++	{ .compatible = "ovti,ov13b10" },
++	{ }
++};
++MODULE_DEVICE_TABLE(of, ov13b10_of_match);
++
+ static struct i2c_driver ov13b10_i2c_driver = {
+ 	.driver = {
+ 		.name = "ov13b10",
+ 		.pm = pm_ptr(&ov13b10_pm_ops),
+ 		.acpi_match_table = ACPI_PTR(ov13b10_acpi_ids),
++		.of_match_table = ov13b10_of_match,
+ 	},
+ 	.probe = ov13b10_probe,
+ 	.remove = ov13b10_remove,

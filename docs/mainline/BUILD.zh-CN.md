@@ -79,6 +79,9 @@ aarch64-linux-gnu-gcc -O2 -static -Wall -Wextra -Werror \
 
 ## USB 模块与运行配置
 
+相机使用与基础内核匹配的独立传感器模块，还需要 `cma=256M` 启动参数、
+libcamera 和桌面相机组件；详见 [相机源码与安装说明](CAMERA.zh-CN.md)。
+
 NB7VPQ904M 配置为模块，构建结果为 `drivers/usb/typec/mux/nb7vpq904m.ko`。日常 initramfs 在 USB 枚举前从 `/bin/nb7vpq904m.ko` 加载它；打包时必须包含与同一内核配置及符号版本匹配的模块，根文件系统也应部署完整匹配的模块目录。USB-C 角色及 redriver 拓扑已合并到板级 DTS，不要重复叠加早期 USB 测试覆盖层，也不要强制设置 `maximum-speed = "super-speed"`。
 
 充电电压 ADC 的独立覆盖层仍在 `configs/kernel/j716f-usbin-adc-overlay.dts`，组装完整启动镜像时需要保留。运行服务、国内 APT 源及日常启动配置见 [运行配置](RUNTIME.zh-CN.md)。

@@ -28,6 +28,15 @@
 !/tools/power/
 !/tools/power/*.c
 !/tools/power/*.h
+!/tools/network/
+!/tools/network/*.py
+!/tools/camera/
+!/tools/camera/modules/
+!/tools/camera/modules/*.c
+!/tools/camera/modules/Makefile
+!/tools/camera/*.sh
+!/tools/camera/*.py
+!/tools/camera/*.patch
 !/tools/sensors/
 !/tools/sensors/**
 !/tools/display-scaling/
