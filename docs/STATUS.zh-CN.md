@@ -1,4 +1,6 @@
-# 当前状态
+# 旧版 R3 状态
+
+本文记录旧版 Ubuntu 22.04 / Linux 6.15.11 R3。当前 7.4/26.10 开发版本请查看 [主线状态](mainline/STATUS.zh-CN.md)。
 
 基线：Ubuntu 22.04 ARM64、Linux 6.15.11 #530、干净安装包 R3。
 

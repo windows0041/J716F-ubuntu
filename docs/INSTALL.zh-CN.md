@@ -1,4 +1,6 @@
-# Lenovo TB-J716F：Android → 干净 Ubuntu 刷机教程
+# Lenovo TB-J716F：旧版 R3 干净 Ubuntu 刷机教程
+
+本文仅适用于下述 Ubuntu 22.04 R3 包。当前 Linux 7.4 / Ubuntu 26.10 开发版本尚无通用安装镜像，入口见 [项目首页](../README.md)；不要将这份 R3 安装流程直接用于当前版本。
 
 版本：2026.10.24-clean-530-r3；Ubuntu 22.04 ARM64，Linux 6.15.11 #530。
 

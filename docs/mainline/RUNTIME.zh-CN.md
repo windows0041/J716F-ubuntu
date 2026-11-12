@@ -1,6 +1,6 @@
 # 日常运行配置
 
-这些文件对应当前已实测安装的通用配置。不会因检出仓库自动安装，也不替代完整的初次安装流程。部署前需确认版本、设备布局和现有服务；设备 UUID、账户、密钥及固件均需自行准备。
+更新日期：2026-11-12。这些文件对应当前已实测安装的通用配置。不会因检出仓库自动安装，也不替代完整的初次安装流程。部署前需确认版本、设备布局和现有服务；设备 UUID、账户、密钥及固件均需自行准备。
 
 ## USB 网络
 
@@ -29,7 +29,7 @@
 
 ## 屏幕键盘、手动休眠与电源键
 
-GNOME 自带屏幕键盘，无需额外安装键盘程序。`configs/ubuntu/dconf/30-j716f-tablet-controls` 启用屏幕键盘与立即锁屏；对应已安装用户也需要设置同名 GSettings 键。保持原来的自动整机休眠关闭策略，手动休眠单独验证。
+GNOME 自带屏幕键盘，无需额外安装键盘程序。`configs/ubuntu/dconf/30-j716f-tablet-controls` 启用屏幕键盘与立即锁屏；对应已安装用户也需要设置同名 GSettings 键。GNOME 按空闲时间自动挂起的策略保持关闭；电源键休眠和下文的光感合盖服务分别控制，不受此设置影响。
 
 将 `tools/power/power-key.py` 安装为 `/usr/local/sbin/j716f-power-key`（0755），服务文件位于 `configs/ubuntu/power-key/j716f-power-key.service`，部署到 `/etc/systemd/system/`，然后重新加载并启用服务。依赖 Python 3、PyGObject/Gio、gdbus、runuser 与 systemd。服务只随 graphical.target 运行，与只充电界面的按键处理分开。
 
@@ -73,8 +73,35 @@ GNOME 自带屏幕键盘，无需额外安装键盘程序。`configs/ubuntu/dcon
 
 这是可选的个人配置，不自动施加给其他用户；不修改账户密码，不清空登录密钥环。原 desktop 文件另行备份，设置过程未改写浏览器配置目录；实测 Chrome 主进程带有 `--password-store=basic`，同时登录密钥环仍锁定。重新开机后，用户再次从图标打开 Chrome，确认没有密钥环密码提示。
 
-## Wi-Fi 自动连接与密钥环
+## 相机
 
-Chrome 的本地密码存储不会改写系统 Wi-Fi 凭据。本机一次启动时，NetworkManager 日志显示缺少认证信息；用户重新连接后，密码才写入 Netplan 永久配置。已重新持久保存活动配置，启用自动连接，设置 PSK 由 NetworkManager 管理（psk-flags=0），并验证保存密码的文件权限为 0600。
+当前桌面应用为 GNOME 相机（发行版包名 `gnome-snapshot`），通过 PipeWire 和 libcamera 使用 S5K4H7、GC5035、OV13B10。三路均已由用户确认能预览、切换和保存照片，重启后已确认驱动自动加载；OV13B10 扩容后完成三轮切换测试中的每轮 240 帧输出，九路次共 2160 帧测试无新增内核日志。
+
+| 组件 | 部署位置或配置 |
+| --- | --- |
+| 匹配的传感器及 CCI 模块 | `/lib/modules/<运行内核版本>/updates/j716f-camera/` |
+| 开机加载列表 | `/etc/modules-load.d/j716f-camera.conf`：v4l2-cci、gc5035、s5k4h7、ov13b10 |
+| 图像连续内存 | 启动镜像命令行 `cma=256M`；实机 `CmaTotal` 为 270336 kB，含独立 8 MiB DSP 池 |
+| 相机运行组件 | libcamera-tools、libcamera-ipa、gstreamer1.0-libcamera、libspa-0.2-libcamera、gnome-snapshot |
+
+先按 [相机构建与安装说明](CAMERA.zh-CN.md) 生成对应内核的模块及清单，再用仓库安装程序核对并部署。安装匹配模块、更新启动参数后正常重启；不要在线卸载正在使用的驱动。仅更换 Image 或只安装相机应用不足以接通当前硬件。可用 `cam --list` 检查枚举，应用显示的顺序可能随探测次序变化，应以传感器名称识别。
+
+当前使用通用软件 ISP。暗光噪声、色彩、自动对焦、录像、完整分辨率及休眠后的恢复仍未全面验证，不能将三路拍照通过理解为已达到原厂相机画质。
+
+## Wi-Fi 固定 MAC、自动连接与密钥环
+
+本机先后出现过两类连接问题：缺少已保存密码，以及启动时的网卡地址变化使旧配置的 MAC 绑定失效。另需检查接口名约束；日志中的 `no-secrets`、MAC 不匹配和接口名不匹配分别对应不同原因。
+
+通过 `sudo python3 tools/network/install-stable-wifi-mac.py` 为本机生成固定的本地管理单播地址，保留接口命名策略，并解除已保存 Wi-Fi 配置中的旧 MAC/接口名限制。脚本基于本机持久化的 machine-id 生成地址；不要把本机生成的文件复制到其他平板。详细方法和恢复说明见 [Wi-Fi 固定 MAC](WIFI-MAC.zh-CN.md)。
+
+| 生成文件 | 用途 |
+| --- | --- |
+| `/etc/systemd/network/10-j716f-wifi-mac.link` | 在网卡创建时应用本机固定地址，保留系统命名策略 |
+| `/etc/NetworkManager/conf.d/91-j716f-wifi-mac.conf` | 扫描与连接使用一致的地址策略 |
+| `/var/backups/j716f-wifi/` | root 私有备份；可能包含密码，不应上传 |
+
+正常重启后已确认 MAC 保持不变、原接口命名策略生效，目标 Wi-Fi 无需重新输入密码即可自动连接。默认 USB SSH 地址不受 Wi-Fi DHCP 地址变化影响。
+
+Chrome 的本地密码存储不会改写系统 Wi-Fi 凭据。密码问题通过将有效 PSK 保存到系统的 Netplan 永久配置、启用自动连接并设置 psk-flags=0 处理，保存文件权限已验证为 0600；固定 MAC 脚本本身不修改密码。
 
 Ubuntu 使用 Netplan 后端时，活动连接的文件出现在 /run/NetworkManager/system-connections 本身不表示密码已丢失；应同时检查 /etc/netplan 的持久配置。保存密码后重新生成 Netplan 配置、重启 NetworkManager 和 wpa_supplicant，实测无需新密码请求即可自动连接；此时登录密钥环仍处于锁定状态。现场 Wi-Fi 凭据、网络名及原配置备份不纳入仓库。

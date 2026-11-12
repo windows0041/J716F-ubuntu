@@ -51,7 +51,7 @@ build/mainline/linux-7.4-rc2/arch/arm64/boot/dts/qcom/sm8250-lenovo-j716f.dtb
 build/mainline/linux-7.4-rc2/                 模块构建结果
 ```
 
-完整组合补丁包含当前全部移植改动及 RPMh 超时修正。单独保存的上游 RPMh 补丁仅供来源追踪，不要再次叠加。保留各文件许可，不自行补写人类 Signed-off-by。
+完整组合补丁包含基础内核移植改动及 RPMh 超时修正；独立相机模块按下文另行构建。单独保存的上游 RPMh 补丁仅供来源追踪，不要再次叠加。保留各文件许可，不自行补写人类 Signed-off-by。
 
 完整源码的导出方法与一致性记录见 [源码快照说明](KERNEL-SOURCE.zh-CN.md)。源码一致不等于任意构建环境会生成字节完全相同的 Image；编译器、时间戳等也会影响构建摘要。
 
