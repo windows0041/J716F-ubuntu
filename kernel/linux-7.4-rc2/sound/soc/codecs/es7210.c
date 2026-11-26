@@ -602,6 +602,7 @@ static const struct snd_soc_component_driver es7210_component_driver = {
 	.num_dapm_widgets	= ARRAY_SIZE(es7210_dapm_widgets),
 	.dapm_routes		= es7210_dapm_routes,
 	.num_dapm_routes	= ARRAY_SIZE(es7210_dapm_routes),
+	.idle_bias_on		= 1,
 	.endianness		= 1,
 };
 

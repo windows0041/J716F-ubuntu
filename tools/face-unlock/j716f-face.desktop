@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=人脸识别
+Name[en]=Face Recognition
+Comment=使用前置摄像头录入与管理刷脸解锁
+Exec=/usr/local/bin/j716f-face-gui
+Icon=avatar-default-symbolic
+Terminal=false
+Type=Application
+Categories=Settings;System;

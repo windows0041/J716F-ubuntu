@@ -111,6 +111,13 @@ struct goodix_ts_data {
 	bool gt738x_trace_ids_initialized;
 	u16 gt738x_trace_ids[GOODIX_MAX_CONTACTS];
 	u16 gt738x_released_slots;
+	bool gt738x_pen_active;
+	u16 gt738x_pen_x;
+	u16 gt738x_pen_y;
+	u16 gt738x_pen_pressure;
+	s8 gt738x_pen_tilt_x;
+	s8 gt738x_pen_tilt_y;
+	u8 gt738x_pen_keys;
 	u8 config[GOODIX_CONFIG_MAX_LENGTH];
 	unsigned short keymap[GOODIX_MAX_KEYS];
 	u8 main_clk[GOODIX_MAIN_CLK_LEN];

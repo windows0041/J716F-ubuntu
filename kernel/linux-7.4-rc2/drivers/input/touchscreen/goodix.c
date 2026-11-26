@@ -357,7 +357,13 @@ static int goodix_create_pen_input(struct goodix_ts_data *ts)
 	 */
 	input_abs_set_res(input, ABS_X, 10);
 	input_abs_set_res(input, ABS_Y, 10);
-	input_set_abs_params(input, ABS_PRESSURE, 0, 255, 0, 0);
+	if (ts->gt738x_mode) {
+		input_set_abs_params(input, ABS_PRESSURE, 0, 4096, 0, 0);
+		input_set_abs_params(input, ABS_TILT_X, -90, 90, 0, 0);
+		input_set_abs_params(input, ABS_TILT_Y, -90, 90, 0, 0);
+	} else {
+		input_set_abs_params(input, ABS_PRESSURE, 0, 255, 0, 0);
+	}
 
 	input_set_capability(input, EV_KEY, BTN_TOUCH);
 	input_set_capability(input, EV_KEY, BTN_TOOL_PEN);
@@ -374,6 +380,13 @@ static int goodix_create_pen_input(struct goodix_ts_data *ts)
 	input->id.version = ts->version;
 
 	ts->input_pen = input;
+	if (ts->gt738x_j716f_mode) {
+		int error = input_register_device(ts->input_pen);
+
+		if (error)
+			return error;
+		ts->pen_input_registered = 1;
+	}
 	return 0;
 }
 
@@ -418,11 +431,42 @@ static void goodix_ts_report_pen_down(struct goodix_ts_data *ts, u8 *data)
 	input_sync(ts->input_pen);
 }
 
+static void goodix_gt738x_report_pen_down(struct goodix_ts_data *ts)
+{
+	int error;
+
+	if (!ts->input_pen)
+		return;
+
+	if (!ts->pen_input_registered) {
+		error = input_register_device(ts->input_pen);
+		ts->pen_input_registered = (error == 0) ? 1 : error;
+	}
+	if (ts->pen_input_registered < 0)
+		return;
+
+	touchscreen_report_pos(ts->input_pen, &ts->prop,
+			       ts->gt738x_pen_x, ts->gt738x_pen_y, false);
+	input_report_abs(ts->input_pen, ABS_PRESSURE, ts->gt738x_pen_pressure);
+	input_report_abs(ts->input_pen, ABS_TILT_X, ts->gt738x_pen_tilt_x);
+	input_report_abs(ts->input_pen, ABS_TILT_Y, ts->gt738x_pen_tilt_y);
+	input_report_key(ts->input_pen, BTN_TOOL_PEN, 1);
+	input_report_key(ts->input_pen, BTN_TOUCH, ts->gt738x_pen_pressure > 0 ? 1 : 0);
+	input_report_key(ts->input_pen, BTN_STYLUS, !!(ts->gt738x_pen_keys & BIT(5)));
+	input_report_key(ts->input_pen, BTN_STYLUS2, !!(ts->gt738x_pen_keys & BIT(4)));
+	input_sync(ts->input_pen);
+}
+
 static void goodix_ts_report_pen_up(struct goodix_ts_data *ts)
 {
 	if (!ts->input_pen)
 		return;
 
+	if (ts->gt738x_mode) {
+		input_report_abs(ts->input_pen, ABS_PRESSURE, 0);
+		input_report_abs(ts->input_pen, ABS_TILT_X, 0);
+		input_report_abs(ts->input_pen, ABS_TILT_Y, 0);
+	}
 	input_report_key(ts->input_pen, BTN_TOUCH, 0);
 	input_report_key(ts->input_pen, BTN_TOOL_PEN, 0);
 	input_report_key(ts->input_pen, BTN_STYLUS, 0);
@@ -558,6 +602,9 @@ static int goodix_gt738x_read_report(struct goodix_ts_data *ts, u8 *point_data)
 	 * instead starts its first finger record there (trace ID, X LE, Y LE,
 	 * width LE, reserved). Byte 0 contains ready and the contact count.
 	 */
+	bool pen_flag = !!((ts->gt738x_j716f_mode ? buf[0] : buf[1]) &
+			   GOODIX_GT738X_PEN_FLAG);
+
 	if (ts->gt738x_j716f_mode)
 		touch_num = buf[0] & 0x0f;
 	else
@@ -579,11 +626,22 @@ static int goodix_gt738x_read_report(struct goodix_ts_data *ts, u8 *point_data)
 				     "J716F ready zero-contact report: %*ph\n",
 				     GOODIX_GT738X_INITIAL_READ, buf);
 
-	/* J716F has one status byte, followed by LE finger records and footer. */
-	report_len = header_size +
-		     GOODIX_GT738X_CONTACT_SIZE + 2;
-	if (touch_num > 1)
-		report_len += GOODIX_GT738X_CONTACT_SIZE * (touch_num - 1);
+	/*
+	 * When GOODIX_GT738X_PEN_FLAG (BIT(5)) is set, the controller appends a
+	 * 12-byte active pen record after any finger records (touch_num includes
+	 * the pen). Total length: header + (touch_num-1)*8 + 12 + 2.
+	 */
+	if (pen_flag && touch_num >= 1) {
+		report_len = header_size +
+			     GOODIX_GT738X_CONTACT_SIZE * (touch_num - 1) +
+			     GOODIX_GT738X_PEN_SIZE + 2;
+	} else {
+		/* J716F has one status byte, followed by LE finger records and footer. */
+		report_len = header_size +
+			     GOODIX_GT738X_CONTACT_SIZE + 2;
+		if (touch_num > 1)
+			report_len += GOODIX_GT738X_CONTACT_SIZE * (touch_num - 1);
+	}
 	if (report_len > GOODIX_GT738X_INITIAL_READ) {
 		error = goodix_i2c_read(ts->client,
 					GOODIX_GT738X_COOR_ADDR +
@@ -621,6 +679,33 @@ static int goodix_gt738x_read_report(struct goodix_ts_data *ts, u8 *point_data)
 				     checksum, touch_num);
 		return -EBADMSG;
 	}
+
+	if (pen_flag && touch_num >= 1) {
+		u8 *pen = &buf[header_size +
+			       GOODIX_GT738X_CONTACT_SIZE * (touch_num - 1)];
+
+		ts->gt738x_pen_x = get_unaligned_le16(&pen[1]);
+		ts->gt738x_pen_y = get_unaligned_le16(&pen[3]);
+		ts->gt738x_pen_pressure = clamp_t(u16, get_unaligned_le16(&pen[5]), 0, 4096);
+		ts->gt738x_pen_tilt_x = clamp_t(int, (s16)get_unaligned_le16(&pen[7]) / 100, -90, 90);
+		ts->gt738x_pen_tilt_y = clamp_t(int, (s16)get_unaligned_le16(&pen[9]) / 100, -90, 90);
+		ts->gt738x_pen_keys = pen[12];
+		ts->gt738x_pen_active = true;
+
+		/* Palm rejection: release any active finger slots while pen is active */
+		ts->gt738x_released_slots = 0;
+		if (ts->gt738x_trace_ids_initialized) {
+			for (slot = 0; slot < ts->max_touch_num; slot++) {
+				if (ts->gt738x_trace_ids[slot] != 0xffff)
+					ts->gt738x_released_slots |= BIT(slot);
+				ts->gt738x_trace_ids[slot] = 0xffff;
+			}
+		}
+		point_data[0] = 0;
+		return 0;
+	}
+
+	ts->gt738x_pen_active = false;
 
 	/* Count only active finger records; width-zero records release slots. */
 	finger_num = 0;
@@ -736,6 +821,12 @@ static void goodix_process_events(struct goodix_ts_data *ts)
 				input_mt_report_slot_state(ts->input_dev,
 							   MT_TOOL_FINGER, false);
 			}
+
+	if (ts->gt738x_mode && ts->gt738x_pen_active) {
+		goodix_gt738x_report_pen_down(ts);
+		goodix_ts_release_keys(ts);
+		goto sync; /* Release any previously registered touches */
+	}
 
 	/* The pen being down is always reported as a single touch */
 	if (touch_num == 1 && (point_data[1] & 0x80)) {
@@ -1833,7 +1924,7 @@ static int goodix_resume(struct device *dev)
 
 		error = goodix_send_cfg(ts, ts->config, ts->chip->config_len);
 		if (error)
-			return error;
+			dev_warn(dev, "goodix_send_cfg failed (%d) on resume, keeping flash config\n", error);
 	}
 
 	error = goodix_request_irq(ts);

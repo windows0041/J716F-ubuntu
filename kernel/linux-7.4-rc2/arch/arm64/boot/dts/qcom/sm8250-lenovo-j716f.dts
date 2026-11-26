@@ -7,10 +7,12 @@
 
 #include <dt-bindings/arm/qcom,ids.h>
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/leds/common.h>
 #include <dt-bindings/sound/qcom,q6afe.h>
 #include <dt-bindings/sound/qcom,q6asm.h>
 #include <dt-bindings/clock/qcom,camcc-sm8250.h>
 #include <dt-bindings/phy/phy.h>
+#include <dt-bindings/usb/pd.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
 #include "sm8250.dtsi"
 #include "pm8009.dtsi"
@@ -1044,7 +1046,7 @@
 		 * Without the configuration the controller answers 0xff at
 		 * 0x8040 and never enters normal reporting mode.
 		 */
-		goodix,config-name = "j716f_cfg.bin";
+		/* Uses Goodix controller flash config directly (no j716f_cfg.bin needed). */
 
 		/*
 		 * The vendor dtbo's __symbols__ node gives the authoritative rail
@@ -2502,7 +2504,11 @@
 		self-powered;
 		vbus-supply = <&pm8150b_vbus>;
 		/* Validate data-role switching without PD resets during enumeration. */
-		pd-disable;
+		op-sink-microwatt = <22500000>;
+		source-pdos = <PDO_FIXED(5000, 1500, PDO_FIXED_DUAL_ROLE | PDO_FIXED_USB_COMM | PDO_FIXED_DATA_SWAP)>;
+		sink-pdos = <PDO_FIXED(5000, 3000, PDO_FIXED_DUAL_ROLE | PDO_FIXED_USB_COMM | PDO_FIXED_DATA_SWAP)
+			     PDO_FIXED(9000, 2500, PDO_FIXED_DUAL_ROLE | PDO_FIXED_USB_COMM | PDO_FIXED_DATA_SWAP)
+			     PDO_FIXED(12000, 2000, PDO_FIXED_DUAL_ROLE | PDO_FIXED_USB_COMM | PDO_FIXED_DATA_SWAP)>;
 		typec-power-opmode = "default";
 
 		ports {
@@ -2532,4 +2538,39 @@
 
 &usb_1_qmpphy_out {
 	remote-endpoint = <&j716f_redriver_phy>;
+};
+
+&cpu7_opp_table {
+	cpu7_opp22: opp-3187200000 {
+		opp-hz = /bits/ 64 <3187200000>;
+		opp-peak-kBps = <8368000 51609600>;
+	};
+};
+
+&pm8009_pon {
+	status = "disabled";
+};
+
+&pm8150l_flash {
+	status = "okay";
+
+	led-0 {
+		function = LED_FUNCTION_FLASH;
+		color = <LED_COLOR_ID_WHITE>;
+		led-sources = <1>;
+		led-max-microamp = <300000>;
+		flash-max-microamp = <1000000>;
+		flash-max-timeout-us = <1280000>;
+		function-enumerator = <0>;
+	};
+
+	led-1 {
+		function = LED_FUNCTION_FLASH;
+		color = <LED_COLOR_ID_WHITE>;
+		led-sources = <2>;
+		led-max-microamp = <300000>;
+		flash-max-microamp = <1000000>;
+		flash-max-timeout-us = <1280000>;
+		function-enumerator = <1>;
+	};
 };

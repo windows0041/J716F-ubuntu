@@ -1,0 +1,1 @@
+SUBSYSTEM=="leds", KERNEL=="white:flash-*", RUN+="/bin/chgrp video /sys%p/brightness /sys%p/flash_brightness /sys%p/flash_timeout /sys%p/flash_strobe", RUN+="/bin/chmod 0664 /sys%p/brightness /sys%p/flash_brightness /sys%p/flash_timeout /sys%p/flash_strobe"
