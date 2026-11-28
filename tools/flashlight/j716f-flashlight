@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+import os
+import signal
+import sys
+import gi
+
+gi.require_version("Gtk", "4.0")
+from gi.repository import Gtk, GLib
+
+LED_ROOT = "/sys/class/leds"
+LEDS = ["white:flash-0", "white:flash-1"]
+
+
+def led_path(name, attr):
+    return os.path.join(LED_ROOT, name, attr)
+
+
+def write_attr(name, attr, val):
+    p = led_path(name, attr)
+    if os.path.exists(p):
+        with open(p, "w") as f:
+            f.write(str(val))
+
+
+def read_attr(name, attr):
+    p = led_path(name, attr)
+    if os.path.exists(p):
+        with open(p, "r") as f:
+            return f.read().strip()
+    return ""
+
+
+def all_off():
+    for name in LEDS:
+        try:
+            write_attr(name, "brightness", 0)
+        except Exception:
+            pass
+
+
+class FlashlightApp(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.j716f.Flashlight")
+        self.is_on = False
+        self.channel_mode = 0  # 0=both, 1=led0, 2=led1
+        self.brightness = 80
+
+    def selected_leds(self):
+        if self.channel_mode == 1:
+            return [LEDS[0]]
+        if self.channel_mode == 2:
+            return [LEDS[1]]
+        return list(LEDS)
+
+    def apply_state(self):
+        sel = set(self.selected_leds())
+        errs = []
+        for name in LEDS:
+            val = self.brightness if (self.is_on and name in sel) else 0
+            try:
+                write_attr(name, "brightness", val)
+            except Exception as e:
+                errs.append(f"{name}: {e}")
+        self.update_status(errs)
+
+    def update_status(self, errs=None):
+        if errs:
+            self.status_label.set_text("错误: " + "; ".join(errs))
+            return
+        parts = []
+        for name in LEDS:
+            b = read_attr(name, "brightness")
+            flt = read_attr(name, "flash_fault")
+            short = name.split(":")[-1]
+            if flt:
+                parts.append(f"{short}={b} (故障:{flt})")
+            else:
+                parts.append(f"{short}={b}")
+        state_str = "已开启" if self.is_on else "已关闭"
+        self.status_label.set_text(f"状态: {state_str}  |  " + "  ".join(parts))
+
+    def on_power_clicked(self, _btn):
+        self.is_on = not self.is_on
+        if self.is_on:
+            self.power_btn.set_label("关闭手电筒")
+            self.power_btn.remove_css_class("suggested-action")
+            self.power_btn.add_css_class("destructive-action")
+        else:
+            self.power_btn.set_label("开启手电筒")
+            self.power_btn.remove_css_class("destructive-action")
+            self.power_btn.add_css_class("suggested-action")
+        self.apply_state()
+
+    def on_scale_changed(self, scale):
+        self.brightness = int(scale.get_value())
+        self.bright_val_label.set_text(f"{self.brightness} / 255")
+        if self.is_on:
+            self.apply_state()
+
+    def on_channel_changed(self, dropdown, _pspec):
+        self.channel_mode = dropdown.get_selected()
+        if self.is_on:
+            self.apply_state()
+
+    def on_strobe_clicked(self, _btn):
+        was_on = self.is_on
+        if was_on:
+            all_off()
+        errs = []
+        for name in self.selected_leds():
+            try:
+                write_attr(name, "flash_timeout", 200000)
+                write_attr(name, "flash_brightness", 500000)
+                write_attr(name, "flash_strobe", 1)
+            except Exception as e:
+                errs.append(f"{name}: {e}")
+        self.update_status(errs)
+        if was_on:
+            GLib.timeout_add(350, lambda: (self.apply_state(), False)[1])
+
+    def on_close_request(self, _win):
+        self.is_on = False
+        all_off()
+        return False
+
+    def do_activate(self):
+        win = self.props.active_window
+        if not win:
+            win = Gtk.ApplicationWindow(application=self)
+            win.set_title("手电筒")
+            win.set_default_size(380, 340)
+            win.connect("close-request", self.on_close_request)
+
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+            box.set_margin_top(24)
+            box.set_margin_bottom(24)
+            box.set_margin_start(24)
+            box.set_margin_end(24)
+            win.set_child(box)
+
+            self.power_btn = Gtk.Button(label="开启手电筒")
+            self.power_btn.set_size_request(-1, 72)
+            self.power_btn.add_css_class("suggested-action")
+            self.power_btn.add_css_class("pill")
+            self.power_btn.connect("clicked", self.on_power_clicked)
+            box.append(self.power_btn)
+
+            bright_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            bright_lbl = Gtk.Label(label="常亮亮度")
+            bright_lbl.set_xalign(0)
+            bright_lbl.set_hexpand(True)
+            self.bright_val_label = Gtk.Label(label=f"{self.brightness} / 255")
+            bright_row.append(bright_lbl)
+            bright_row.append(self.bright_val_label)
+            box.append(bright_row)
+
+            scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 1, 255, 1)
+            scale.set_value(self.brightness)
+            scale.set_draw_value(False)
+            scale.connect("value-changed", self.on_scale_changed)
+            box.append(scale)
+
+            chan_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+            chan_lbl = Gtk.Label(label="测试通道")
+            chan_lbl.set_xalign(0)
+            chan_lbl.set_hexpand(True)
+            chan_model = Gtk.StringList.new([
+                "双灯同步 (flash-0 + flash-1)",
+                "仅通道 0 (white:flash-0)",
+                "仅通道 1 (white:flash-1)",
+            ])
+            dropdown = Gtk.DropDown(model=chan_model)
+            dropdown.set_selected(0)
+            dropdown.connect("notify::selected", self.on_channel_changed)
+            chan_row.append(chan_lbl)
+            chan_row.append(dropdown)
+            box.append(chan_row)
+
+            strobe_btn = Gtk.Button(label="单次闪光测试 (0.2秒)")
+            strobe_btn.set_size_request(-1, 44)
+            strobe_btn.connect("clicked", self.on_strobe_clicked)
+            box.append(strobe_btn)
+
+            self.status_label = Gtk.Label(label="")
+            self.status_label.set_wrap(True)
+            self.status_label.add_css_class("dim-label")
+            box.append(self.status_label)
+            self.update_status()
+
+        win.present()
+
+
+def main():
+    signal.signal(signal.SIGINT, lambda *_: (all_off(), sys.exit(0)))
+    signal.signal(signal.SIGTERM, lambda *_: (all_off(), sys.exit(0)))
+    app = FlashlightApp()
+    ret = app.run(sys.argv)
+    all_off()
+    return ret
+
+
+if __name__ == "__main__":
+    sys.exit(main())

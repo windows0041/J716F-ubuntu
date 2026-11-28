@@ -1,0 +1,1 @@
+ACTION=="add|change", SUBSYSTEM=="platform", KERNEL=="998000.serial", ATTR{power/control}="on"

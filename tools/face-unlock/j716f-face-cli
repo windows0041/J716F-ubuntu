@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+import argparse
+import fcntl
+import glob
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+import cv2
+import numpy as np
+
+CAM_BIN = "/opt/j716f-camera/bin/cam"
+CAM_LIB = "/opt/j716f-camera/lib"
+FRONT_CAM_ID = "/base/soc@0/cci@ac50000/i2c-bus@0/camera@10"
+YUNET_PATH = "/opt/j716f-face/models/face_detection_yunet_2022mar.onnx"
+SFACE_PATH = "/opt/j716f-face/models/face_recognition_sface_2021dec.onnx"
+DB_DIR = "/var/lib/j716f-face"
+CONF_PATH = "/etc/j716f-face.conf"
+LOCK_PATH = "/run/j716f-face.lock"
+
+RAW_W, RAW_H = 3256, 2448
+FRAME_BYTES = RAW_W * RAW_H * 4
+DEFAULT_CONF = {
+    "allow_login": True,
+    "allow_sudo": True,
+    "threshold": 0.40,
+    "frames": 10,
+}
+
+
+def load_conf():
+    conf = dict(DEFAULT_CONF)
+    try:
+        with open(CONF_PATH, "r") as f:
+            conf.update(json.load(f))
+    except Exception:
+        pass
+    return conf
+
+
+def save_conf(conf):
+    with open(CONF_PATH, "w") as f:
+        json.dump(conf, f, indent=2)
+    os.chmod(CONF_PATH, 0o644)
+
+
+def db_path(user):
+    safe = "".join(c for c in user if c.isalnum() or c in "._-")
+    return os.path.join(DB_DIR, f"{safe}.json")
+
+
+def load_db(user):
+    p = db_path(user)
+    if not os.path.exists(p):
+        return []
+    try:
+        with open(p, "r") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def save_db(user, entries):
+    os.makedirs(DB_DIR, exist_ok=True)
+    p = db_path(user)
+    with open(p, "w") as f:
+        json.dump(entries, f, indent=2)
+    os.chmod(p, 0o644)
+
+
+def load_models():
+    det = cv2.FaceDetectorYN.create(YUNET_PATH, "", (320, 320), 0.75, 0.3, 5000)
+    rec = cv2.FaceRecognizerSF.create(SFACE_PATH, "")
+    return det, rec
+
+
+def raw_to_bgr_small(raw_file):
+    data = np.fromfile(raw_file, dtype=np.uint8)
+    if data.size != FRAME_BYTES:
+        return None
+    img = data.reshape((RAW_H, RAW_W, 4))
+    # ABGR8888 little-endian memory order is [R, G, B, A]; OpenCV expects BGR
+    small = img[::4, ::4, :3][:, :, ::-1]
+    return cv2.resize(small, (640, 480), interpolation=cv2.INTER_AREA)
+
+
+def capture_frames(num_frames=10, keep_last=3):
+    tmpdir = tempfile.mkdtemp(prefix="j716f-face-", dir="/dev/shm")
+    try:
+        env = dict(os.environ)
+        env["LD_LIBRARY_PATH"] = CAM_LIB + (":" + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
+        cmd = [
+            CAM_BIN,
+            "-c", FRONT_CAM_ID,
+            "-s", "role=viewfinder",
+            f"-C{num_frames}",
+            f"--file={tmpdir}/f_#.bin",
+        ]
+        subprocess.run(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=6, check=False)
+        files = sorted(glob.glob(os.path.join(tmpdir, "f_*.bin")))
+        frames = []
+        for fp in files[-keep_last:]:
+            bgr = raw_to_bgr_small(fp)
+            if bgr is not None:
+                frames.append(bgr)
+        return frames
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def detect_best_face(det, bgr):
+    rotations = [
+        (0, None),
+        (90, cv2.ROTATE_90_CLOCKWISE),
+        (270, cv2.ROTATE_90_COUNTERCLOCKWISE),
+        (180, cv2.ROTATE_180),
+    ]
+    for deg, rot_code in rotations:
+        img = bgr if rot_code is None else cv2.rotate(bgr, rot_code)
+        h, w = img.shape[:2]
+        det.setInputSize((w, h))
+        _, faces = det.detect(img)
+        if faces is not None and len(faces) > 0:
+            # Pick largest face by area
+            best = max(faces, key=lambda f: float(f[2]) * float(f[3]))
+            return img, best, deg
+    return bgr, None, 0
+
+
+def draw_preview(img, face, text, save_path):
+    vis = img.copy()
+    if face is not None:
+        x, y, w, h = [int(v) for v in face[:4]]
+        cv2.rectangle(vis, (x, y), (x + w, y + h), (40, 220, 80), 3)
+        for i in range(5):
+            lx, ly = int(face[4 + i * 2]), int(face[5 + i * 2])
+            cv2.circle(vis, (lx, ly), 3, (0, 220, 255), -1)
+    if text:
+        cv2.putText(vis, text, (16, 36), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (40, 220, 80), 2, cv2.LINE_AA)
+    cv2.imwrite(save_path, vis, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+    try:
+        os.chmod(save_path, 0o644)
+    except Exception:
+        pass
+
+
+def cmd_status(args):
+    conf = load_conf()
+    entries = load_db(args.user)
+    out = {
+        "user": args.user,
+        "count": len(entries),
+        "labels": [e.get("label", "") for e in entries],
+        "config": conf,
+    }
+    print(json.dumps(out, ensure_ascii=False))
+    return 0
+
+
+def cmd_clear(args):
+    p = db_path(args.user)
+    if os.path.exists(p):
+        os.remove(p)
+    print(json.dumps({"ok": True, "user": args.user, "count": 0}))
+    return 0
+
+
+def cmd_set_config(args):
+    conf = load_conf()
+    if args.allow_login is not None:
+        conf["allow_login"] = bool(args.allow_login)
+    if args.allow_sudo is not None:
+        conf["allow_sudo"] = bool(args.allow_sudo)
+    if args.threshold is not None:
+        conf["threshold"] = max(0.25, min(0.75, float(args.threshold)))
+    save_conf(conf)
+    print(json.dumps({"ok": True, "config": conf}))
+    return 0
+
+
+def cmd_enroll(args):
+    t0 = time.time()
+    conf = load_conf()
+    det, rec = load_models()
+    frames = capture_frames(num_frames=int(conf.get("frames", 10)), keep_last=3)
+    if not frames:
+        print(json.dumps({"ok": False, "error": "前置摄像头未采集到图像（可能正被占用）"}, ensure_ascii=False))
+        return 2
+
+    best_img, best_face, best_deg = None, None, 0
+    for fr in reversed(frames):
+        img, face, deg = detect_best_face(det, fr)
+        if face is not None:
+            best_img, best_face, best_deg = img, face, deg
+            break
+
+    if best_face is None:
+        if args.save_preview:
+            draw_preview(frames[-1], None, "No face detected", args.save_preview)
+        print(json.dumps({"ok": False, "error": "未检测到人脸，请正对前置摄像头并保持光线充足"}, ensure_ascii=False))
+        return 1
+
+    aligned = rec.alignCrop(best_img, best_face)
+    feat = rec.feature(aligned).flatten().astype(float).tolist()
+    entries = load_db(args.user)
+    label = args.label or f"样本 {len(entries) + 1}"
+    entries.append({
+        "label": label,
+        "created": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "deg": best_deg,
+        "feature": feat,
+    })
+    save_db(args.user, entries)
+
+    if args.save_preview:
+        draw_preview(best_img, best_face, f"Enrolled #{len(entries)} ({best_deg} deg)", args.save_preview)
+
+    elapsed = int((time.time() - t0) * 1000)
+    print(json.dumps({
+        "ok": True,
+        "count": len(entries),
+        "label": label,
+        "deg": best_deg,
+        "elapsed_ms": elapsed,
+    }, ensure_ascii=False))
+    return 0
+
+
+def cmd_verify(args):
+    t0 = time.time()
+    conf = load_conf()
+    entries = load_db(args.user)
+    if not entries:
+        print(json.dumps({"ok": False, "matched": False, "error": "尚未录入人脸"}, ensure_ascii=False))
+        return 1
+
+    det, rec = load_models()
+    frames = capture_frames(num_frames=int(conf.get("frames", 10)), keep_last=3)
+    if not frames:
+        print(json.dumps({"ok": False, "matched": False, "error": "摄像头采图失败或正被占用"}, ensure_ascii=False))
+        return 2
+
+    threshold = float(conf.get("threshold", 0.40))
+    best_score = -1.0
+    best_label = ""
+    best_vis = (frames[-1], None, 0)
+
+    for fr in reversed(frames):
+        img, face, deg = detect_best_face(det, fr)
+        if face is None:
+            continue
+        aligned = rec.alignCrop(img, face)
+        feat = rec.feature(aligned)
+        for e in entries:
+            ref = np.array(e["feature"], dtype=np.float32).reshape(1, -1)
+            score = float(rec.match(feat, ref, cv2.FaceRecognizerSF_FR_COSINE))
+            if score > best_score:
+                best_score = score
+                best_label = e.get("label", "")
+                best_vis = (img, face, deg)
+        if best_score >= threshold:
+            break
+
+    matched = best_score >= threshold
+    if args.save_preview:
+        tag = f"MATCH {best_score:.3f}" if matched else (f"NO MATCH {best_score:.3f}" if best_score >= 0 else "No face")
+        draw_preview(best_vis[0], best_vis[1], tag, args.save_preview)
+
+    elapsed = int((time.time() - t0) * 1000)
+    print(json.dumps({
+        "ok": True,
+        "matched": matched,
+        "score": round(best_score, 4),
+        "threshold": threshold,
+        "label": best_label,
+        "deg": best_vis[2],
+        "elapsed_ms": elapsed,
+    }, ensure_ascii=False))
+    return 0 if matched else 1
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p_st = sub.add_parser("status")
+    p_st.add_argument("user", nargs="?", default="ubuntu")
+
+    p_cl = sub.add_parser("clear")
+    p_cl.add_argument("user", nargs="?", default="ubuntu")
+
+    p_cfg = sub.add_parser("set-config")
+    p_cfg.add_argument("--allow-login", type=int, default=None)
+    p_cfg.add_argument("--allow-sudo", type=int, default=None)
+    p_cfg.add_argument("--threshold", type=float, default=None)
+
+    p_en = sub.add_parser("enroll")
+    p_en.add_argument("user", nargs="?", default="ubuntu")
+    p_en.add_argument("--label", default="")
+    p_en.add_argument("--save-preview", default="")
+
+    p_vf = sub.add_parser("verify")
+    p_vf.add_argument("user", nargs="?", default="ubuntu")
+    p_vf.add_argument("--save-preview", default="")
+
+    args = ap.parse_args()
+
+    if args.cmd in ("enroll", "verify"):
+        os.makedirs(os.path.dirname(LOCK_PATH), exist_ok=True)
+        with open(LOCK_PATH, "w") as lf:
+            try:
+                fcntl.flock(lf, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                print(json.dumps({"ok": False, "matched": False, "error": "人脸识别正在运行中"}, ensure_ascii=False))
+                return 2
+            return cmd_enroll(args) if args.cmd == "enroll" else cmd_verify(args)
+    elif args.cmd == "status":
+        return cmd_status(args)
+    elif args.cmd == "clear":
+        return cmd_clear(args)
+    elif args.cmd == "set-config":
+        return cmd_set_config(args)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

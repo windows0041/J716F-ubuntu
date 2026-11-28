@@ -1,0 +1,12 @@
+[Unit]
+Description=J716F QCA6390 Bluetooth UART Auto-Recovery Watchdog
+After=bluetooth.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/j716f-bt-watchdog
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

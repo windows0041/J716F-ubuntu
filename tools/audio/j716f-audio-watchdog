@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+import subprocess
+import time
+
+STATUS_FILE = "/proc/asound/card0/pcm0p/sub0/status"
+last_hw_ptr = None
+stall_ticks = 0
+
+while True:
+    time.sleep(2.0)
+    try:
+        txt = open(STATUS_FILE, "r").read()
+    except Exception:
+        last_hw_ptr = None
+        stall_ticks = 0
+        continue
+
+    if "state: RUNNING" not in txt:
+        last_hw_ptr = None
+        stall_ticks = 0
+        continue
+
+    hw_ptr = None
+    for line in txt.splitlines():
+        if line.startswith("hw_ptr"):
+            hw_ptr = line.split(":", 1)[1].strip()
+            break
+
+    if hw_ptr is not None and hw_ptr == last_hw_ptr:
+        stall_ticks += 1
+        if stall_ticks >= 2:
+            # pcm0p stayed RUNNING with frozen hw_ptr for >= 4s -> recover PipeWire
+            subprocess.run(
+                ["systemctl", "--user", "restart", "pipewire", "pipewire-pulse", "wireplumber"],
+                check=False,
+            )
+            last_hw_ptr = None
+            stall_ticks = 0
+            time.sleep(3.0)
+    else:
+        last_hw_ptr = hw_ptr
+        stall_ticks = 0

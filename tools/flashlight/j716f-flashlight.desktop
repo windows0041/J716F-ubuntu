@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=手电筒
+Name[en]=Flashlight
+Comment=控制后置闪光灯常亮与单次闪光测试
+Exec=/usr/local/bin/j716f-flashlight
+Icon=display-brightness-symbolic
+Terminal=false
+Type=Application
+Categories=Utility;

@@ -1,0 +1,5 @@
+[org/gnome/mutter]
+auto-maximize=false
+
+[org/gnome/desktop/wm/preferences]
+button-layout='appmenu:minimize,maximize,close'

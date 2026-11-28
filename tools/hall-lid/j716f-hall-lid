@@ -1,0 +1,240 @@
+#!/usr/bin/env python3
+"""
+Lenovo Xiaoxin Pad Pro 2021 (TB-J716F) Hall Effect Cover Sensor Daemon.
+Hardware: ROHM BU52053NVX on SM8250 TLMM GPIO 121 (active-low when magnet near / cover closed).
+Uses Linux GPIO v2 character device edge interrupts (0% CPU idle) + uinput SW_LID & KEY_WAKEUP.
+"""
+import ctypes
+import fcntl
+import glob
+import os
+import select
+import signal
+import struct
+import subprocess
+import sys
+import time
+
+# Linux GPIO v2 ioctls & flags
+GPIO_GET_CHIPINFO_IOCTL = 0x8044B401
+GPIO_V2_GET_LINE_IOCTL = 0xC250B407
+GPIO_V2_LINE_GET_VALUES_IOCTL = 0xC010B40E
+
+GPIO_V2_LINE_FLAG_ACTIVE_LOW = 1 << 1
+GPIO_V2_LINE_FLAG_INPUT = 1 << 2
+GPIO_V2_LINE_FLAG_EDGE_RISING = 1 << 4
+GPIO_V2_LINE_FLAG_EDGE_FALLING = 1 << 5
+GPIO_V2_LINE_FLAG_BIAS_PULL_UP = 1 << 8
+
+GPIO_V2_LINE_ATTR_ID_DEBOUNCE = 3
+GPIO_V2_LINE_EVENT_RISING_EDGE = 1
+GPIO_V2_LINE_EVENT_FALLING_EDGE = 2
+
+# Linux uinput constants
+UINPUT_MAX_NAME_SIZE = 80
+UI_SET_EVBIT = 0x40045564
+UI_SET_KEYBIT = 0x40045565
+UI_SET_SWBIT = 0x4004556D
+UI_DEV_SETUP = 0x405C5503
+UI_DEV_CREATE = 0x5501
+UI_DEV_DESTROY = 0x5502
+
+EV_SYN = 0x00
+EV_KEY = 0x01
+EV_SW = 0x05
+SYN_REPORT = 0x00
+SW_LID = 0x00
+KEY_WAKEUP = 143
+BUS_HOST = 0x19
+
+HALL_GPIO_LINE = 121
+DEBOUNCE_US = 60000  # 60ms debounce
+
+
+class GpioV2LineAttribute(ctypes.Structure):
+    _fields_ = [
+        ("id", ctypes.c_uint32),
+        ("padding", ctypes.c_uint32),
+        ("val", ctypes.c_uint64),
+    ]
+
+
+class GpioV2LineConfigAttribute(ctypes.Structure):
+    _fields_ = [
+        ("attr", GpioV2LineAttribute),
+        ("mask", ctypes.c_uint64),
+    ]
+
+
+class GpioV2LineConfig(ctypes.Structure):
+    _fields_ = [
+        ("flags", ctypes.c_uint64),
+        ("num_attrs", ctypes.c_uint32),
+        ("padding", ctypes.c_uint32 * 5),
+        ("attrs", GpioV2LineConfigAttribute * 10),
+    ]
+
+
+class GpioV2LineRequest(ctypes.Structure):
+    _fields_ = [
+        ("offsets", ctypes.c_uint32 * 64),
+        ("consumer", ctypes.c_char * 32),
+        ("config", GpioV2LineConfig),
+        ("num_lines", ctypes.c_uint32),
+        ("event_buffer_size", ctypes.c_uint32),
+        ("padding", ctypes.c_uint32 * 5),
+        ("fd", ctypes.c_int32),
+    ]
+
+
+class GpioV2LineValues(ctypes.Structure):
+    _fields_ = [
+        ("bits", ctypes.c_uint64),
+        ("mask", ctypes.c_uint64),
+    ]
+
+
+class GpioV2LineEvent(ctypes.Structure):
+    _fields_ = [
+        ("timestamp_ns", ctypes.c_uint64),
+        ("id", ctypes.c_uint32),
+        ("offset", ctypes.c_uint32),
+        ("seqno", ctypes.c_uint32),
+        ("line_seqno", ctypes.c_uint32),
+        ("padding", ctypes.c_uint32 * 6),
+    ]
+
+
+def find_tlmm_chip():
+    for path in sorted(glob.glob("/dev/gpiochip*")):
+        try:
+            with open(path, "rb") as f:
+                buf = bytearray(68)
+                fcntl.ioctl(f, GPIO_GET_CHIPINFO_IOCTL, buf)
+                label = buf[32:64].split(b"\x00")[0].decode("ascii", errors="ignore")
+                if "f100000.pinctrl" in label:
+                    return path
+        except OSError:
+            continue
+    return "/dev/gpiochip4"
+
+
+def create_uinput_lid():
+    fd = os.open("/dev/uinput", os.O_WRONLY | os.O_NONBLOCK)
+    fcntl.ioctl(fd, UI_SET_EVBIT, EV_SW)
+    fcntl.ioctl(fd, UI_SET_SWBIT, SW_LID)
+    fcntl.ioctl(fd, UI_SET_EVBIT, EV_KEY)
+    fcntl.ioctl(fd, UI_SET_KEYBIT, KEY_WAKEUP)
+    # struct uinput_setup: struct input_id (4x uint16), char name[80], uint32 ff_effects_max
+    setup = struct.pack("<HHHH80sI", BUS_HOST, 0x17EF, 0x716F, 1, b"J716F Hall Lid Switch", 0)
+    fcntl.ioctl(fd, UI_DEV_SETUP, setup)
+    fcntl.ioctl(fd, UI_DEV_CREATE)
+    return fd
+
+
+def emit(fd, ev_type, code, value):
+    now = time.time()
+    sec = int(now)
+    usec = int((now - sec) * 1_000_000)
+    os.write(fd, struct.pack("<qqHHi", sec, usec, ev_type, code, value))
+
+
+def trigger_gnome_screen(closed: bool):
+    """Ensure GNOME blanks/locks cleanly on cover close and wakes immediately on open."""
+    env = os.environ.copy()
+    env["DBUS_SESSION_BUS_ADDRESS"] = "unix:path=/run/user/1000/bus"
+    if closed:
+        subprocess.Popen(
+            ["su", "-", "ubuntu", "-c",
+             "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
+             "gdbus call --session --dest org.gnome.ScreenSaver "
+             "--object-path /org/gnome/ScreenSaver "
+             "--method org.gnome.ScreenSaver.SetActive true"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+    else:
+        subprocess.Popen(
+            ["su", "-", "ubuntu", "-c",
+             "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus "
+             "gdbus call --session --dest org.gnome.ScreenSaver "
+             "--object-path /org/gnome/ScreenSaver "
+             "--method org.gnome.ScreenSaver.SimulateUserActivity"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+
+
+def main():
+    chip_path = find_tlmm_chip()
+    chip_fd = os.open(chip_path, os.O_RDONLY)
+
+    req = GpioV2LineRequest()
+    req.offsets[0] = HALL_GPIO_LINE
+    req.consumer = b"j716f-hall-lid"
+    req.num_lines = 1
+    req.config.flags = (
+        GPIO_V2_LINE_FLAG_INPUT
+        | GPIO_V2_LINE_FLAG_ACTIVE_LOW
+        | GPIO_V2_LINE_FLAG_EDGE_RISING
+        | GPIO_V2_LINE_FLAG_EDGE_FALLING
+    )
+    req.config.num_attrs = 1
+    req.config.attrs[0].attr.id = GPIO_V2_LINE_ATTR_ID_DEBOUNCE
+    req.config.attrs[0].attr.val = DEBOUNCE_US
+    req.config.attrs[0].mask = 1
+
+    fcntl.ioctl(chip_fd, GPIO_V2_GET_LINE_IOCTL, req)
+    line_fd = req.fd
+    os.close(chip_fd)
+
+    uinput_fd = create_uinput_lid()
+    time.sleep(0.2)
+
+    # Read initial state (active-low: bit=1 means cover CLOSED, bit=0 means cover OPEN)
+    vals = GpioV2LineValues(bits=0, mask=1)
+    fcntl.ioctl(line_fd, GPIO_V2_LINE_GET_VALUES_IOCTL, vals)
+    closed = bool(vals.bits & 1)
+    emit(uinput_fd, EV_SW, SW_LID, 1 if closed else 0)
+    emit(uinput_fd, EV_SYN, SYN_REPORT, 0)
+    print(f"[j716f-hall-lid] Monitoring {chip_path} line {HALL_GPIO_LINE}, initial lid={'CLOSED' if closed else 'OPEN'}", flush=True)
+
+    running = True
+    def _stop(*_):
+        nonlocal running
+        running = False
+    signal.signal(signal.SIGTERM, _stop)
+    signal.signal(signal.SIGINT, _stop)
+
+    ev_size = ctypes.sizeof(GpioV2LineEvent)
+    try:
+        while running:
+            r, _, _ = select.select([line_fd], [], [], 2.0)
+            if not r:
+                continue
+            raw = os.read(line_fd, ev_size)
+            if len(raw) < ev_size:
+                continue
+            ev = GpioV2LineEvent.from_buffer_copy(raw)
+            # With ACTIVE_LOW: RISING_EDGE = magnet near (CLOSED), FALLING_EDGE = magnet away (OPEN)
+            new_closed = (ev.id == GPIO_V2_LINE_EVENT_RISING_EDGE)
+            if new_closed == closed:
+                continue
+            closed = new_closed
+            print(f"[j716f-hall-lid] Cover {'CLOSED' if closed else 'OPENED'}", flush=True)
+            emit(uinput_fd, EV_SW, SW_LID, 1 if closed else 0)
+            if not closed:
+                emit(uinput_fd, EV_KEY, KEY_WAKEUP, 1)
+                emit(uinput_fd, EV_SYN, SYN_REPORT, 0)
+                emit(uinput_fd, EV_KEY, KEY_WAKEUP, 0)
+            emit(uinput_fd, EV_SYN, SYN_REPORT, 0)
+            trigger_gnome_screen(closed)
+    finally:
+        try:
+            fcntl.ioctl(uinput_fd, UI_DEV_DESTROY)
+        except OSError:
+            pass
+        os.close(uinput_fd)
+        os.close(line_fd)
+
+
+if __name__ == "__main__":
+    main()

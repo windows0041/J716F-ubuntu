@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+import fcntl, os, re, select, struct, subprocess, time
+
+DEV = "/dev/video20"
+W, H = 640, 480
+FOURCC = int.from_bytes(b"YUYV", "little")
+FRAME_SZ = W * H * 2
+
+fmt = bytearray(208)
+struct.pack_into("<I", fmt, 0, 2)
+struct.pack_into("<IIIIIII", fmt, 8, W, H, FOURCC, 1, W * 2, FRAME_SZ, 8)
+VIDIOC_S_FMT = 0xC0D05605
+
+parm = bytearray(204)
+struct.pack_into("<I", parm, 0, 2)
+struct.pack_into("<IIII", parm, 4, 0, 0, 1, 30)
+VIDIOC_S_PARM = 0xC0CC5616
+
+fd = os.open(DEV, os.O_RDWR)
+fcntl.ioctl(fd, VIDIOC_S_FMT, fmt)
+try:
+    fcntl.ioctl(fd, VIDIOC_S_PARM, parm)
+except OSError:
+    pass
+
+black = bytes([0, 128] * (W * H))
+os.write(fd, black)
+
+MY_PID = str(os.getpid())
+
+def select_front_camera():
+    try:
+        out = subprocess.check_output(["wpctl", "status"], text=True, stderr=subprocess.DEVNULL)
+        in_video = False
+        in_sources = False
+        for line in out.splitlines():
+            if line.strip() == "Video":
+                in_video = True
+            elif in_video and "Sources:" in line:
+                in_sources = True
+            elif in_sources and ("Source endpoints:" in line or "Settings" in line):
+                break
+            elif in_sources and "s5k4h7" in line:
+                m = re.search(r"(\d+)\.\s+s5k4h7", line)
+                if m:
+                    subprocess.run(["wpctl", "set-default", m.group(1)], stderr=subprocess.DEVNULL)
+                    return
+    except Exception:
+        pass
+
+def has_reader():
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit() or pid == MY_PID:
+            continue
+        fddir = f"/proc/{pid}/fd"
+        try:
+            for f in os.listdir(fddir):
+                try:
+                    if os.readlink(f"{fddir}/{f}") == DEV:
+                        return True
+                except OSError:
+                    pass
+        except OSError:
+            pass
+    return False
+
+# PipeWire libcamera SPA ABGR8888 memory layout is [R,G,B,A=255], which is GStreamer RGBA.
+# Reinterpreting ABGR -> RGBA via capssetter eliminates the red tint (where A=255 was read as R=255).
+cmd = [
+    "gst-launch-1.0", "-q",
+    "pipewiresrc", "!",
+    "video/x-raw,format=RGBA,width=3200,height=1800", "!",
+    "videoscale", "add-borders=true", "!",
+    "videoconvert", "!",
+    f"video/x-raw,format=YUY2,width={W},height={H}", "!",
+    "fdsink", "fd=1", "sync=false"
+]
+
+proc = None
+idle_since = None
+try:
+    while True:
+        if proc is None:
+            if has_reader():
+                select_front_camera()
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                idle_since = None
+            else:
+                time.sleep(0.5)
+        else:
+            r, _, _ = select.select([proc.stdout], [], [], 0.5)
+            if r:
+                buf = proc.stdout.read(FRAME_SZ)
+                if not buf or len(buf) < FRAME_SZ:
+                    proc.terminate()
+                    proc.wait(timeout=2)
+                    proc = None
+                    continue
+                os.write(fd, buf)
+            if not has_reader():
+                if idle_since is None:
+                    idle_since = time.monotonic()
+                elif time.monotonic() - idle_since > 2.0:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    proc = None
+                    idle_since = None
+            else:
+                idle_since = None
+finally:
+    if proc:
+        proc.terminate()
+    os.close(fd)

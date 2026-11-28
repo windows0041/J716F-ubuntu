@@ -179,6 +179,7 @@ struct pmic_typec_port {
 	int				cc;
 	bool				debouncing_cc;
 	struct delayed_work		cc_debounce_dwork;
+	struct delayed_work		hvdcp_dwork;
 
 	spinlock_t			lock;	/* Register atomicity */
 };
@@ -332,6 +333,156 @@ static int qcom_pmic_typec_port_get_vbus(struct tcpc_dev *tcpc)
 	mutex_unlock(&pmic_typec_port->vbus_lock);
 
 	return ret;
+}
+
+/* PM8150B SMB5 charger registers (50 mA/LSB, verified against factory SM8250 kernel) */
+#define PM8150B_CHGR_FCC_CFG			0x1061
+#define PM8150B_USBIN_APSD_STATUS		0x1307
+#define PM8150B_APSD_DONE_BIT			BIT(0)
+#define PM8150B_USBIN_APSD_RESULT		0x1308
+#define PM8150B_APSD_SDP_BIT			BIT(0)
+#define PM8150B_APSD_OCP_BIT			BIT(1)
+#define PM8150B_APSD_CDP_BIT			BIT(2)
+#define PM8150B_APSD_DCP_BIT			BIT(3)
+#define PM8150B_APSD_FLOAT_BIT			BIT(4)
+#define PM8150B_USBIN_QC_CHANGE_STATUS		0x1309
+#define PM8150B_USBIN_CMD_ICL_OVERRIDE		0x1341
+#define PM8150B_USBIN_ICL_OVERRIDE_BIT		BIT(1)
+#define PM8150B_USBIN_ADAPTER_ALLOW_CFG		0x1360
+#define PM8150B_USBIN_ADAPTER_ALLOW_5V_9V_12V	0x07
+#define PM8150B_USBIN_OPTIONS_1_CFG		0x1362
+#define PM8150B_HVDCP_AUTH_ALG_EN_BIT		BIT(6)
+#define PM8150B_HVDCP_AUTONOMOUS_EN_BIT		BIT(5)
+#define PM8150B_AUTO_SRC_DETECT_BIT		BIT(3)
+#define PM8150B_HVDCP_EN_BIT			BIT(2)
+#define PM8150B_HVDCP_ALL_BITS			(PM8150B_HVDCP_AUTH_ALG_EN_BIT | \
+						 PM8150B_HVDCP_AUTONOMOUS_EN_BIT | \
+						 PM8150B_AUTO_SRC_DETECT_BIT | \
+						 PM8150B_HVDCP_EN_BIT)
+#define PM8150B_USBIN_ICL_OPTIONS		0x1366
+#define PM8150B_USBIN_MODE_CHG_BIT		BIT(0)
+#define PM8150B_USB51_MODE_BIT			BIT(1)
+#define PM8150B_USBIN_CURRENT_LIMIT_CFG		0x1370
+#define PM8150B_SMB5_CURRENT_STEP_MA		50
+
+static void qcom_pmic_typec_enable_hvdcp(struct regmap *regmap)
+{
+	regmap_write(regmap, PM8150B_USBIN_ADAPTER_ALLOW_CFG,
+		     PM8150B_USBIN_ADAPTER_ALLOW_5V_9V_12V);
+	regmap_update_bits(regmap, PM8150B_USBIN_OPTIONS_1_CFG,
+			   PM8150B_HVDCP_ALL_BITS, PM8150B_HVDCP_ALL_BITS);
+}
+
+static int qcom_pmic_typec_apply_limits(struct regmap *regmap,
+					u32 icl_ma, u32 fcc_ma)
+{
+	int ret;
+
+	qcom_pmic_typec_enable_hvdcp(regmap);
+
+	ret = regmap_write(regmap, PM8150B_USBIN_CURRENT_LIMIT_CFG,
+			   icl_ma / PM8150B_SMB5_CURRENT_STEP_MA);
+	if (ret)
+		return ret;
+
+	if (icl_ma > 500) {
+		regmap_update_bits(regmap, PM8150B_USBIN_ICL_OPTIONS,
+				   PM8150B_USBIN_MODE_CHG_BIT | PM8150B_USB51_MODE_BIT,
+				   PM8150B_USBIN_MODE_CHG_BIT);
+		regmap_update_bits(regmap, PM8150B_USBIN_CMD_ICL_OVERRIDE,
+				   PM8150B_USBIN_ICL_OVERRIDE_BIT,
+				   PM8150B_USBIN_ICL_OVERRIDE_BIT);
+	} else {
+		regmap_update_bits(regmap, PM8150B_USBIN_ICL_OPTIONS,
+				   PM8150B_USBIN_MODE_CHG_BIT | PM8150B_USB51_MODE_BIT,
+				   PM8150B_USB51_MODE_BIT);
+		regmap_update_bits(regmap, PM8150B_USBIN_CMD_ICL_OVERRIDE,
+				   PM8150B_USBIN_ICL_OVERRIDE_BIT, 0);
+	}
+
+	return regmap_write(regmap, PM8150B_CHGR_FCC_CFG,
+			    fcc_ma / PM8150B_SMB5_CURRENT_STEP_MA);
+}
+
+static void qcom_pmic_typec_hvdcp_work(struct work_struct *work)
+{
+	struct pmic_typec_port *port =
+		container_of(work, struct pmic_typec_port, hvdcp_dwork.work);
+	struct regmap *regmap = port->regmap;
+	unsigned int apsd_stat = 0, apsd_res = 0, qc_stat = 0;
+
+	regmap_read(regmap, PM8150B_USBIN_APSD_STATUS, &apsd_stat);
+	regmap_read(regmap, PM8150B_USBIN_APSD_RESULT, &apsd_res);
+	regmap_read(regmap, PM8150B_USBIN_QC_CHANGE_STATUS, &qc_stat);
+
+	if (!(apsd_stat & PM8150B_APSD_DONE_BIT))
+		return;
+
+	/* Never override a real PC USB SDP port */
+	if (apsd_res & PM8150B_APSD_SDP_BIT)
+		return;
+
+	if (apsd_res & PM8150B_APSD_DCP_BIT) {
+		qcom_pmic_typec_apply_limits(regmap, 2500, 4200);
+		dev_info(port->dev,
+			 "pm8150b charger: APSD DCP/HVDCP (res=0x%02x qc=0x%02x) -> ICL=2500mA FCC=4200mA\n",
+			 apsd_res, qc_stat);
+	} else if (apsd_res & (PM8150B_APSD_OCP_BIT | PM8150B_APSD_CDP_BIT |
+			       PM8150B_APSD_FLOAT_BIT)) {
+		qcom_pmic_typec_apply_limits(regmap, 1500, 1800);
+		dev_info(port->dev,
+			 "pm8150b charger: APSD OCP/CDP/FLOAT (res=0x%02x) -> ICL=1500mA FCC=1800mA\n",
+			 apsd_res);
+	}
+}
+
+static int qcom_pmic_typec_port_set_current_limit(struct tcpc_dev *tcpc,
+						  u32 max_ma, u32 mv)
+{
+	struct pmic_typec *tcpm = tcpc_to_tcpm(tcpc);
+	struct pmic_typec_port *pmic_typec_port = tcpm->pmic_typec_port;
+	struct regmap *regmap = pmic_typec_port->regmap;
+	u32 icl_ma, fcc_ma;
+	int ret;
+
+	/*
+	 * Standard USB-A to USB-C cables (56k Rp) report mv=5000, max_ma=0;
+	 * only treat mv == 0 as disconnect so A-to-C charging and HVDCP work.
+	 */
+	if (!mv) {
+		cancel_delayed_work(&pmic_typec_port->hvdcp_dwork);
+		regmap_update_bits(regmap, PM8150B_USBIN_CMD_ICL_OVERRIDE,
+				   PM8150B_USBIN_ICL_OVERRIDE_BIT, 0);
+		regmap_write(regmap, PM8150B_USBIN_CURRENT_LIMIT_CFG,
+			     500 / PM8150B_SMB5_CURRENT_STEP_MA);
+		regmap_write(regmap, PM8150B_CHGR_FCC_CFG,
+			     2000 / PM8150B_SMB5_CURRENT_STEP_MA);
+		return 0;
+	}
+
+	/*
+	 * Hardware AICL protects the adapter if VBUS droops; keep FCC at 4200 mA
+	 * so autonomous QC2.0/QC3.0 (9V/10V/12V HVDCP) can reach full 20W.
+	 */
+	icl_ma = clamp_t(u32, max_ma, 2200, 3000);
+	fcc_ma = 4200;
+
+	ret = qcom_pmic_typec_apply_limits(regmap, icl_ma, fcc_ma);
+	if (ret)
+		return ret;
+
+	if (max_ma <= 500 && mv <= 5000) {
+		/* Legacy USB-A cable (56k Rp): re-check APSD/HVDCP after handshake */
+		mod_delayed_work(system_wq, &pmic_typec_port->hvdcp_dwork,
+				 msecs_to_jiffies(1500));
+	} else {
+		cancel_delayed_work(&pmic_typec_port->hvdcp_dwork);
+	}
+
+	dev_info(pmic_typec_port->dev,
+		 "pm8150b charger: negotiated %umV %umA -> ICL=%umA FCC=%umA\n",
+		 mv, max_ma, icl_ma, fcc_ma);
+	return 0;
 }
 
 static int qcom_pmic_typec_port_set_vbus(struct tcpc_dev *tcpc, bool on, bool sink)
@@ -685,6 +836,7 @@ static int qcom_pmic_typec_port_start(struct pmic_typec *tcpm,
 done:
 	if (ret)
 		disable_delayed_work_sync(&pmic_typec_port->cc_debounce_dwork);
+	disable_delayed_work_sync(&pmic_typec_port->hvdcp_dwork);
 
 	return ret;
 }
@@ -767,10 +919,14 @@ int qcom_pmic_typec_port_probe(struct platform_device *pdev,
 			return ret;
 	}
 
+	INIT_DELAYED_WORK(&pmic_typec_port->hvdcp_dwork, qcom_pmic_typec_hvdcp_work);
+	qcom_pmic_typec_enable_hvdcp(regmap);
+
 	tcpm->pmic_typec_port = pmic_typec_port;
 
 	tcpm->tcpc.get_vbus = qcom_pmic_typec_port_get_vbus;
 	tcpm->tcpc.set_vbus = qcom_pmic_typec_port_set_vbus;
+	tcpm->tcpc.set_current_limit = qcom_pmic_typec_port_set_current_limit;
 	tcpm->tcpc.set_cc = qcom_pmic_typec_port_set_cc;
 	tcpm->tcpc.get_cc = qcom_pmic_typec_port_get_cc;
 	tcpm->tcpc.set_polarity = qcom_pmic_typec_port_set_polarity;

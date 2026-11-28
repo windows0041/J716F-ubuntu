@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+case "$1" in
+  pre)
+    if hciconfig hci0 2>/dev/null | grep -q "UP RUNNING"; then
+      touch /run/j716f-bt-was-up
+    else
+      rm -f /run/j716f-bt-was-up
+    fi
+    ;;
+  post)
+    (
+      sleep 3
+      echo on > /sys/bus/platform/devices/998000.serial/power/control 2>/dev/null || true
+      if [ -f /run/j716f-bt-was-up ]; then
+        if ! hciconfig hci0 2>/dev/null | grep -q "UP RUNNING" || \
+           dmesg | tail -n 30 | grep -q "hci0: command .* tx timeout"; then
+          /usr/local/bin/j716f-bt-recover
+        fi
+      fi
+    ) >/dev/null 2>&1 &
+    ;;
+esac

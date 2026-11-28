@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+LAST_ERR_TS=""
+while true; do
+  sleep 15
+  ERR_LINE=$(dmesg | grep -E "hci0: (command .* tx timeout|Opcode .* failed: -110)" | tail -n 1 || true)
+  BAD_BD=$(hciconfig hci0 2>/dev/null | grep -c "00:00:00:00:00:00" || true)
+  if [ -n "$ERR_LINE" ] && [ "$ERR_LINE" != "$LAST_ERR_TS" ]; then
+    LAST_ERR_TS="$ERR_LINE"
+    if ! hciconfig hci0 2>/dev/null | grep -q "UP RUNNING"; then
+      /usr/local/bin/j716f-bt-recover
+      sleep 10
+      LAST_ERR_TS=$(dmesg | grep -E "hci0: (command .* tx timeout|Opcode .* failed: -110)" | tail -n 1 || true)
+    fi
+  elif [ "$BAD_BD" -gt 0 ]; then
+    /usr/local/bin/j716f-bt-recover
+    sleep 10
+  fi
+done

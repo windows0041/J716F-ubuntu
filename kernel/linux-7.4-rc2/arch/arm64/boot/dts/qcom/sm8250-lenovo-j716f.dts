@@ -7,10 +7,13 @@
 
 #include <dt-bindings/arm/qcom,ids.h>
 #include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/input/linux-event-codes.h>
+#include <dt-bindings/leds/common.h>
 #include <dt-bindings/sound/qcom,q6afe.h>
 #include <dt-bindings/sound/qcom,q6asm.h>
 #include <dt-bindings/clock/qcom,camcc-sm8250.h>
 #include <dt-bindings/phy/phy.h>
+#include <dt-bindings/usb/pd.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
 #include "sm8250.dtsi"
 #include "pm8009.dtsi"
@@ -107,6 +110,16 @@
 			debounce-interval = <15>;
 			linux,can-disable;
 			wakeup-source;
+		};
+
+		hall-sensor {
+			label = "Hall Effect Sensor";
+			gpios = <&tlmm 121 GPIO_ACTIVE_LOW>;
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_LID>;
+			debounce-interval = <60>;
+			wakeup-source;
+			linux,can-disable;
 		};
 	};
 
@@ -1054,7 +1067,7 @@
 		 * Without the configuration the controller answers 0xff at
 		 * 0x8040 and never enters normal reporting mode.
 		 */
-		goodix,config-name = "j716f_cfg.bin";
+		/* Uses Goodix controller flash config directly (no j716f_cfg.bin needed). */
 
 		/*
 		 * The vendor dtbo's __symbols__ node gives the authoritative rail
@@ -2604,9 +2617,17 @@
 		try-power-role = "sink";
 		self-powered;
 		vbus-supply = <&vreg_usb_otg_vbus>;
-		/* Validate data-role switching without PD resets during enumeration. */
-		pd-disable;
-		typec-power-opmode = "default";
+		op-sink-microwatt = <22500000>;
+		source-pdos = <PDO_FIXED(5000, 1500,
+					 PDO_FIXED_DUAL_ROLE |
+					 PDO_FIXED_USB_COMM |
+					 PDO_FIXED_DATA_SWAP)>;
+		sink-pdos = <PDO_FIXED(5000, 3000,
+				       PDO_FIXED_DUAL_ROLE |
+				       PDO_FIXED_USB_COMM |
+				       PDO_FIXED_DATA_SWAP)
+			     PDO_FIXED(9000, 2500, 0)
+			     PDO_FIXED(12000, 2000, 0)>;
 
 		ports {
 			#address-cells = <1>;
@@ -2647,4 +2668,39 @@
 	/delete-property/ compatible;
 	/delete-property/ reusable;
 	no-map;
+};
+
+&cpu7_opp_table {
+	cpu7_opp22: opp-3187200000 {
+		opp-hz = /bits/ 64 <3187200000>;
+		opp-peak-kBps = <8368000 51609600>;
+	};
+};
+
+&pm8009_pon {
+	status = "disabled";
+};
+
+&pm8150l_flash {
+	status = "okay";
+
+	led-0 {
+		function = LED_FUNCTION_FLASH;
+		color = <LED_COLOR_ID_WHITE>;
+		led-sources = <1>;
+		led-max-microamp = <300000>;
+		flash-max-microamp = <1000000>;
+		flash-max-timeout-us = <1280000>;
+		function-enumerator = <0>;
+	};
+
+	led-1 {
+		function = LED_FUNCTION_FLASH;
+		color = <LED_COLOR_ID_WHITE>;
+		led-sources = <2>;
+		led-max-microamp = <300000>;
+		flash-max-microamp = <1000000>;
+		flash-max-timeout-us = <1280000>;
+		function-enumerator = <1>;
+	};
 };

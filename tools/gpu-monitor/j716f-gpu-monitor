@@ -1,0 +1,301 @@
+#!/usr/bin/env python3
+import collections
+import glob
+import os
+import sys
+import time
+import gi
+
+gi.require_version("Gtk", "4.0")
+from gi.repository import Gtk, GLib
+
+HISTORY = 60
+
+
+def read_int(path, default=0):
+    try:
+        with open(path, "r") as f:
+            return int(f.read().strip())
+    except Exception:
+        return default
+
+
+def read_str(path, default=""):
+    try:
+        with open(path, "r") as f:
+            return f.read().strip()
+    except Exception:
+        return default
+
+
+def find_thermal(keywords):
+    for z in sorted(glob.glob("/sys/class/thermal/thermal_zone*")):
+        t = read_str(os.path.join(z, "type"))
+        for kw in keywords:
+            if kw in t:
+                return os.path.join(z, "temp")
+    return None
+
+
+def sample_drm_gpu_clients():
+    """Return dict: client_id -> (gpu_ns, pid, comm) using kernel drm-engine-gpu fdinfo."""
+    clients = {}
+    for pid_str in os.listdir("/proc"):
+        if not pid_str.isdigit():
+            continue
+        fdinfo_dir = f"/proc/{pid_str}/fdinfo"
+        try:
+            fds = os.listdir(fdinfo_dir)
+        except Exception:
+            continue
+        comm = None
+        for fd in fds:
+            p = f"{fdinfo_dir}/{fd}"
+            try:
+                with open(p, "r") as f:
+                    txt = f.read()
+            except Exception:
+                continue
+            if "drm-engine-gpu:" not in txt:
+                continue
+            cid = None
+            ns = None
+            for line in txt.splitlines():
+                if line.startswith("drm-client-id:"):
+                    cid = line.split(":", 1)[1].strip()
+                elif line.startswith("drm-engine-gpu:"):
+                    val = line.split(":", 1)[1].strip().split()[0]
+                    try:
+                        ns = int(val)
+                    except ValueError:
+                        pass
+            if cid is not None and ns is not None and cid not in clients:
+                if comm is None:
+                    comm = read_str(f"/proc/{pid_str}/comm", pid_str)
+                clients[cid] = (ns, pid_str, comm)
+    return clients
+
+
+def sample_cpu_stat():
+    try:
+        with open("/proc/stat", "r") as f:
+            parts = f.readline().split()[1:]
+        vals = [int(x) for x in parts[:8]]
+        idle = vals[3] + vals[4]
+        total = sum(vals)
+        return idle, total
+    except Exception:
+        return 0, 1
+
+
+def sample_mem():
+    info = {}
+    try:
+        with open("/proc/meminfo", "r") as f:
+            for line in f:
+                k, v = line.split(":", 1)
+                info[k] = int(v.strip().split()[0])
+    except Exception:
+        pass
+    total = info.get("MemTotal", 1)
+    avail = info.get("MemAvailable", 0)
+    used = max(0, total - avail)
+    return used / 1048576.0, total / 1048576.0, used * 100.0 / total
+
+
+class GraphArea(Gtk.DrawingArea):
+    def __init__(self, color_rgb, title):
+        super().__init__()
+        self.color = color_rgb
+        self.title = title
+        self.data = collections.deque([0.0] * HISTORY, maxlen=HISTORY)
+        self.set_size_request(-1, 110)
+        self.set_draw_func(self._draw)
+
+    def push(self, val):
+        self.data.append(max(0.0, min(100.0, float(val))))
+        self.queue_draw()
+
+    def _draw(self, _area, cr, w, h):
+        # Background
+        cr.set_source_rgba(0.10, 0.11, 0.13, 1.0)
+        cr.rectangle(0, 0, w, h)
+        cr.fill()
+
+        # Grid lines
+        cr.set_source_rgba(1, 1, 1, 0.08)
+        cr.set_line_width(1.0)
+        for frac in (0.25, 0.5, 0.75):
+            y = h * frac
+            cr.move_to(0, y)
+            cr.line_to(w, y)
+            cr.stroke()
+
+        # Area fill + stroke
+        pts = list(self.data)
+        if len(pts) >= 2:
+            r, g, b = self.color
+            step = w / (len(pts) - 1)
+            cr.move_to(0, h)
+            for i, v in enumerate(pts):
+                cr.line_to(i * step, h - (v / 100.0) * (h - 8) - 4)
+            cr.line_to(w, h)
+            cr.close_path()
+            cr.set_source_rgba(r, g, b, 0.22)
+            cr.fill()
+
+            cr.set_source_rgba(r, g, b, 0.95)
+            cr.set_line_width(2.0)
+            for i, v in enumerate(pts):
+                x = i * step
+                y = h - (v / 100.0) * (h - 8) - 4
+                if i == 0:
+                    cr.move_to(x, y)
+                else:
+                    cr.line_to(x, y)
+            cr.stroke()
+
+        # Overlay label
+        cr.set_source_rgba(1, 1, 1, 0.85)
+        cr.select_font_face("Sans", 0, 1)
+        cr.set_font_size(12)
+        cr.move_to(8, 18)
+        cr.show_text(f"{self.title}: {pts[-1]:.1f}%")
+
+
+class PerfMonitorApp(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.j716f.HardwareMonitor")
+        self.gpu_temp_path = find_thermal(["gpu-top", "gpuss", "gpu-bottom"])
+        self.prev_time = time.monotonic_ns()
+        self.prev_clients = sample_drm_gpu_clients()
+        self.prev_cpu = sample_cpu_stat()
+
+    def do_activate(self):
+        win = self.props.active_window
+        if not win:
+            win = Gtk.ApplicationWindow(application=self)
+            win.set_title("J716F 硬件性能监视器 (Adreno 650)")
+            win.set_default_size(520, 620)
+
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+            box.set_margin_top(14)
+            box.set_margin_bottom(14)
+            box.set_margin_start(16)
+            box.set_margin_end(16)
+            win.set_child(box)
+
+            # GPU section
+            self.gpu_hdr = Gtk.Label(label="GPU: Qualcomm Adreno 650 (FD650 / Turnip)")
+            self.gpu_hdr.set_xalign(0)
+            box.append(self.gpu_hdr)
+
+            self.gpu_graph = GraphArea((0.20, 0.82, 0.48), "Adreno 650 GPU 占用")
+            box.append(self.gpu_graph)
+
+            self.gpu_detail = Gtk.Label(label="频率: -- MHz | 温度: -- °C")
+            self.gpu_detail.set_xalign(0)
+            box.append(self.gpu_detail)
+
+            self.gpu_procs = Gtk.Label(label="GPU 进程占用：采样中...")
+            self.gpu_procs.set_xalign(0)
+            self.gpu_procs.set_wrap(True)
+            self.gpu_procs.add_css_class("monospace")
+            box.append(self.gpu_procs)
+
+            box.append(Gtk.Separator())
+
+            # CPU section
+            self.cpu_hdr = Gtk.Label(label="CPU: Snapdragon 870 (SM8250-AC, 8核 最高 3.19 GHz)")
+            self.cpu_hdr.set_xalign(0)
+            box.append(self.cpu_hdr)
+
+            self.cpu_graph = GraphArea((0.25, 0.62, 0.96), "CPU 总占用")
+            box.append(self.cpu_graph)
+
+            self.cpu_detail = Gtk.Label(label="小核: -- | 大核: -- | 超大核 CPU7: --")
+            self.cpu_detail.set_xalign(0)
+            box.append(self.cpu_detail)
+
+            box.append(Gtk.Separator())
+
+            # Memory & Battery section
+            self.mem_label = Gtk.Label(label="内存: --")
+            self.mem_label.set_xalign(0)
+            box.append(self.mem_label)
+
+            self.batt_label = Gtk.Label(label="电池: --")
+            self.batt_label.set_xalign(0)
+            box.append(self.batt_label)
+
+            GLib.timeout_add(1000, self.on_tick)
+        win.present()
+
+    def on_tick(self):
+        now = time.monotonic_ns()
+        dt_ns = max(1, now - self.prev_time)
+        self.prev_time = now
+
+        # 1. Real Adreno 650 GPU utilization from kernel drm-engine-gpu counters
+        cur_clients = sample_drm_gpu_clients()
+        total_gpu_ns = 0
+        per_proc = collections.defaultdict(float)
+        for cid, (ns, pid, comm) in cur_clients.items():
+            if cid in self.prev_clients:
+                d = ns - self.prev_clients[cid][0]
+                if d > 0:
+                    total_gpu_ns += d
+                    per_proc[f"{comm} ({pid})"] += d * 100.0 / dt_ns
+        self.prev_clients = cur_clients
+
+        gpu_pct = min(100.0, total_gpu_ns * 100.0 / dt_ns)
+        self.gpu_graph.push(gpu_pct)
+
+        gpu_cur = read_int("/sys/class/devfreq/3d00000.gpu/cur_freq") // 1_000_000
+        gpu_max = read_int("/sys/class/devfreq/3d00000.gpu/max_freq") // 1_000_000
+        gpu_temp = read_int(self.gpu_temp_path) / 1000.0 if self.gpu_temp_path else 0.0
+        self.gpu_detail.set_text(
+            f"GPU 占用: {gpu_pct:5.1f}%  |  实时频率: {gpu_cur} / {gpu_max} MHz  |  温度: {gpu_temp:.1f} °C"
+        )
+
+        top = sorted(per_proc.items(), key=lambda kv: kv[1], reverse=True)[:4]
+        if top and top[0][1] >= 0.1:
+            lines = [f"  • {name:<22} {pct:5.1f}%" for name, pct in top if pct >= 0.1]
+            self.gpu_procs.set_text("GPU 实时占用进程：\n" + "\n".join(lines))
+        else:
+            self.gpu_procs.set_text("GPU 实时占用进程：空闲 (0.0%)")
+
+        # 2. CPU usage & cluster frequencies
+        idle, total = sample_cpu_stat()
+        d_idle = idle - self.prev_cpu[0]
+        d_total = max(1, total - self.prev_cpu[1])
+        self.prev_cpu = (idle, total)
+        cpu_pct = max(0.0, min(100.0, (1.0 - d_idle / d_total) * 100.0))
+        self.cpu_graph.push(cpu_pct)
+
+        f0 = read_int("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq") / 1_000_000.0
+        f4 = read_int("/sys/devices/system/cpu/cpu4/cpufreq/scaling_cur_freq") / 1_000_000.0
+        f7 = read_int("/sys/devices/system/cpu/cpu7/cpufreq/scaling_cur_freq") / 1_000_000.0
+        self.cpu_detail.set_text(
+            f"CPU 占用: {cpu_pct:5.1f}%  |  小核: {f0:.2f} GHz  |  大核: {f4:.2f} GHz  |  超大核 CPU7: {f7:.2f} GHz"
+        )
+
+        # 3. Memory
+        used_gb, tot_gb, mem_pct = sample_mem()
+        self.mem_label.set_text(f"内存占用: {used_gb:.2f} / {tot_gb:.2f} GiB ({mem_pct:.1f}%)")
+
+        # 4. Battery real-time power
+        cap = read_int("/sys/class/power_supply/bq27541-0/capacity")
+        volt = read_int("/sys/class/power_supply/bq27541-0/voltage_now") / 1_000_000.0
+        curr_ma = read_int("/sys/class/power_supply/bq27541-0/current_now") / 1000.0
+        btemp = read_int("/sys/class/power_supply/bq27541-0/temp") / 10.0
+        status = read_str("/sys/class/power_supply/bq27541-0/status")
+        pwr_w = volt * curr_ma / 1000.0
+        self.batt_label.set_text(
+            f"电池: {cap}% ({status})  |  {volt:.2f}V  {curr_ma:+.0f}mA ({pwr_w:+.1f}W)  |  {btemp:.1f}°C"
+        )
+        return True
+
+
+if __name__ == "__main__":
+    sys.exit(PerfMonitorApp().run(sys.argv))

@@ -1,0 +1,224 @@
+#!/usr/bin/env python3
+import getpass
+import json
+import os
+import subprocess
+import sys
+import threading
+import gi
+
+gi.require_version("Gtk", "4.0")
+from gi.repository import Gtk, GLib
+
+USER = getpass.getuser()
+PREVIEW_PATH = f"/tmp/j716f-face-preview-{USER}.jpg"
+
+
+def run_cli(args):
+    cmd = ["sudo", "-n", "/usr/local/bin/j716f-face-cli"] + args
+    p = subprocess.run(cmd, capture_output=True, text=True)
+    out = p.stdout.strip()
+    try:
+        return p.returncode, json.loads(out) if out else {"ok": False, "error": p.stderr.strip()}
+    except Exception:
+        return p.returncode, {"ok": False, "error": out or p.stderr.strip()}
+
+
+class FaceApp(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id="org.j716f.FaceRecognition")
+        self.busy = False
+        self.updating_ui = False
+
+    def set_busy(self, flag, msg=None):
+        self.busy = flag
+        self.enroll_btn.set_sensitive(not flag)
+        self.verify_btn.set_sensitive(not flag)
+        self.clear_btn.set_sensitive(not flag)
+        if msg is not None:
+            self.status_label.set_text(msg)
+
+    def refresh_status(self):
+        _, data = run_cli(["status", USER])
+        count = data.get("count", 0)
+        conf = data.get("config", {})
+        self.updating_ui = True
+        self.count_label.set_text(f"已录入人脸样本：{count} 个（建议录入 2–3 个不同角度/光线）")
+        self.login_sw.set_active(bool(conf.get("allow_login", True)))
+        self.sudo_sw.set_active(bool(conf.get("allow_sudo", True)))
+        thr = float(conf.get("threshold", 0.40))
+        self.thr_scale.set_value(thr)
+        self.thr_val_label.set_text(f"{thr:.2f}")
+        self.updating_ui = False
+
+    def load_preview(self):
+        if os.path.exists(PREVIEW_PATH):
+            self.picture.set_filename(PREVIEW_PATH)
+
+    def run_bg(self, cli_args, start_msg, on_done):
+        if self.busy:
+            return
+        self.set_busy(True, start_msg)
+
+        def worker():
+            rc, data = run_cli(cli_args)
+            GLib.idle_add(self._finish_bg, rc, data, on_done)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_bg(self, rc, data, on_done):
+        self.set_busy(False)
+        self.load_preview()
+        self.refresh_status()
+        on_done(rc, data)
+        return False
+
+    def on_enroll(self, _btn):
+        def done(rc, d):
+            if d.get("ok"):
+                self.status_label.set_text(
+                    f"录入成功！当前共 {d['count']} 个样本（角度 {d['deg']}°，耗时 {d['elapsed_ms']} ms）"
+                )
+            else:
+                self.status_label.set_text("录入失败：" + str(d.get("error", "未知错误")))
+
+        self.run_bg(
+            ["enroll", USER, "--save-preview", PREVIEW_PATH],
+            "正在调用前置摄像头录入人脸，请正对屏幕...",
+            done,
+        )
+
+    def on_verify(self, _btn):
+        def done(rc, d):
+            if d.get("matched"):
+                self.status_label.set_text(
+                    f"识别通过！相似度 {d['score']:.3f} ≥ {d['threshold']:.2f}（匹配：{d['label']}，耗时 {d['elapsed_ms']} ms）"
+                )
+            elif d.get("ok"):
+                sc = d.get("score", -1)
+                if sc < 0:
+                    self.status_label.set_text(f"未检测到人脸（耗时 {d.get('elapsed_ms', 0)} ms）")
+                else:
+                    self.status_label.set_text(
+                        f"未通过：相似度 {sc:.3f} < {d['threshold']:.2f}（耗时 {d['elapsed_ms']} ms）"
+                    )
+            else:
+                self.status_label.set_text("测试失败：" + str(d.get("error", "未知错误")))
+
+        self.run_bg(
+            ["verify", USER, "--save-preview", PREVIEW_PATH],
+            "正在调用前置摄像头测试识别...",
+            done,
+        )
+
+    def on_clear(self, _btn):
+        run_cli(["clear", USER])
+        self.refresh_status()
+        self.status_label.set_text("已清除所有已录入的人脸样本。")
+
+    def on_config_changed(self, *_args):
+        if self.updating_ui:
+            return
+        thr = round(self.thr_scale.get_value(), 2)
+        self.thr_val_label.set_text(f"{thr:.2f}")
+        run_cli([
+            "set-config",
+            "--allow-login", "1" if self.login_sw.get_active() else "0",
+            "--allow-sudo", "1" if self.sudo_sw.get_active() else "0",
+            "--threshold", f"{thr:.2f}",
+        ])
+
+    def do_activate(self):
+        win = self.props.active_window
+        if not win:
+            win = Gtk.ApplicationWindow(application=self)
+            win.set_title("人脸识别设置")
+            win.set_default_size(460, 620)
+
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+            box.set_margin_top(18)
+            box.set_margin_bottom(18)
+            box.set_margin_start(20)
+            box.set_margin_end(20)
+            win.set_child(box)
+
+            self.count_label = Gtk.Label(label="")
+            self.count_label.set_xalign(0)
+            box.append(self.count_label)
+
+            frame = Gtk.Frame()
+            self.picture = Gtk.Picture()
+            self.picture.set_size_request(400, 260)
+            self.picture.set_can_shrink(True)
+            frame.set_child(self.picture)
+            box.append(frame)
+
+            btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+            btn_row.set_homogeneous(True)
+            self.enroll_btn = Gtk.Button(label="录入人脸")
+            self.enroll_btn.set_size_request(-1, 48)
+            self.enroll_btn.add_css_class("suggested-action")
+            self.enroll_btn.connect("clicked", self.on_enroll)
+
+            self.verify_btn = Gtk.Button(label="测试识别")
+            self.verify_btn.set_size_request(-1, 48)
+            self.verify_btn.connect("clicked", self.on_verify)
+
+            self.clear_btn = Gtk.Button(label="清除人脸")
+            self.clear_btn.set_size_request(-1, 48)
+            self.clear_btn.add_css_class("destructive-action")
+            self.clear_btn.connect("clicked", self.on_clear)
+
+            btn_row.append(self.enroll_btn)
+            btn_row.append(self.verify_btn)
+            btn_row.append(self.clear_btn)
+            box.append(btn_row)
+
+            self.status_label = Gtk.Label(label="点击「录入人脸」开始使用前置摄像头录入。")
+            self.status_label.set_wrap(True)
+            self.status_label.set_xalign(0)
+            box.append(self.status_label)
+
+            box.append(Gtk.Separator())
+
+            row1 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            l1 = Gtk.Label(label="锁屏 / 登录界面启用刷脸解锁")
+            l1.set_xalign(0)
+            l1.set_hexpand(True)
+            self.login_sw = Gtk.Switch()
+            self.login_sw.connect("notify::active", self.on_config_changed)
+            row1.append(l1)
+            row1.append(self.login_sw)
+            box.append(row1)
+
+            row2 = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            l2 = Gtk.Label(label="本地终端 sudo 启用刷脸认证（SSH 自动跳过）")
+            l2.set_xalign(0)
+            l2.set_hexpand(True)
+            self.sudo_sw = Gtk.Switch()
+            self.sudo_sw.connect("notify::active", self.on_config_changed)
+            row2.append(l2)
+            row2.append(self.sudo_sw)
+            box.append(row2)
+
+            thr_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+            tl = Gtk.Label(label="识别严格度阈值（默认 0.40，越高越严格）")
+            tl.set_xalign(0)
+            tl.set_hexpand(True)
+            self.thr_val_label = Gtk.Label(label="0.40")
+            thr_row.append(tl)
+            thr_row.append(self.thr_val_label)
+            box.append(thr_row)
+
+            self.thr_scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0.30, 0.60, 0.02)
+            self.thr_scale.set_draw_value(False)
+            self.thr_scale.connect("value-changed", self.on_config_changed)
+            box.append(self.thr_scale)
+
+            self.refresh_status()
+
+        win.present()
+
+
+if __name__ == "__main__":
+    sys.exit(FaceApp().run(sys.argv))

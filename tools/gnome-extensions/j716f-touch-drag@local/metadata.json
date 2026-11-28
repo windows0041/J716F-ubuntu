@@ -1,0 +1,6 @@
+{
+  "uuid": "j716f-touch-drag@local",
+  "name": "J716F Touch Window Drag",
+  "description": "Enable touchscreen titlebar dragging for frameless Electron/XWayland windows (e.g. mCloud, WeChat, QQ) when native grab is not initiated.",
+  "shell-version": ["46"]
+}

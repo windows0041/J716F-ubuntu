@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -u
+logger -t j716f-bt-recover "Recovering QCA6390 Bluetooth via 998000.serial rebind..."
+rfkill unblock bluetooth 2>/dev/null || true
+if [ -e /sys/bus/platform/drivers/qcom_geni_serial/998000.serial ]; then
+  echo 998000.serial > /sys/bus/platform/drivers/qcom_geni_serial/unbind 2>/dev/null || true
+  sleep 1
+fi
+echo 998000.serial > /sys/bus/platform/drivers/qcom_geni_serial/bind 2>/dev/null || true
+sleep 2
+echo on > /sys/bus/platform/devices/998000.serial/power/control 2>/dev/null || true
+systemctl restart bluetooth 2>/dev/null || true
+sleep 2
+hciconfig hci0 up 2>/dev/null || true
+bluetoothctl power on 2>/dev/null || true
+logger -t j716f-bt-recover "Recovery complete."

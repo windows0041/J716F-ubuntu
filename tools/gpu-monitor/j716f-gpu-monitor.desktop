@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=硬件性能监视器 (GPU)
+Name[en]=J716F GPU & Hardware Monitor
+Comment=实时监测 Adreno 650 GPU 真实占用率、频率、CPU 睿频与电池功率
+Exec=/usr/local/bin/j716f-gpu-monitor
+Icon=utilities-system-monitor-symbolic
+Terminal=false
+Type=Application
+Categories=System;Monitor;
